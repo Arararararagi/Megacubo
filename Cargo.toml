@@ -54,6 +54,9 @@ lru = "0.12"
 futures-util = "0.3"
 tokio-util = { version = "0.7", features = ["io"] }
 
+# URL parsing for relative media resolution
+url = "2"
+
 # Memory arena for object pooling
 bumpalo = "3"
 

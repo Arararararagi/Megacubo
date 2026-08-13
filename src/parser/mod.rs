@@ -2,6 +2,7 @@ use std::io::BufRead;
 use regex::Regex;
 use tracing::info;
 use tokio::io::{AsyncRead, AsyncBufReadExt};
+use url::Url;
 
 /// M3U entry representing a channel
 #[derive(Debug, Clone)]
@@ -15,6 +16,10 @@ pub struct M3uEntry {
     pub tvg_logo: Option<String>,
     pub tvg_country: Option<String>,
     pub tvg_language: Option<String>,
+    pub catchup: Option<String>,
+    pub catchup_source: Option<String>,
+    pub catchup_days: Option<String>,
+    pub tvg_shift: Option<String>,
 }
 
 /// Mutable accumulator for the streaming line processor.
@@ -28,6 +33,25 @@ struct M3uParseState {
     current_tvg_logo: Option<String>,
     current_tvg_country: Option<String>,
     current_tvg_language: Option<String>,
+    current_catchup: Option<String>,
+    current_catchup_source: Option<String>,
+    current_catchup_days: Option<String>,
+    current_tvg_shift: Option<String>,
+}
+
+impl M3uParseState {
+    fn reset_entry(&mut self) {
+        self.current_name = None;
+        self.current_tvg_id = None;
+        self.current_tvg_name = None;
+        self.current_tvg_logo = None;
+        self.current_tvg_country = None;
+        self.current_tvg_language = None;
+        self.current_catchup = None;
+        self.current_catchup_source = None;
+        self.current_catchup_days = None;
+        self.current_tvg_shift = None;
+    }
 }
 
 /// M3U parser with streaming support
@@ -39,6 +63,14 @@ pub struct M3uParser {
     tvg_country_re: Regex,
     tvg_language_re: Regex,
     group_re: Regex,
+    catchup_re: Regex,
+    catchup_source_re: Regex,
+    catchup_days_re: Regex,
+    tvg_shift_re: Regex,
+    hls_name_re: Regex,
+    hls_resolution_re: Regex,
+    /// Base URL used to resolve relative media URLs.
+    base_url: Option<String>,
 }
 
 impl M3uParser {
@@ -51,7 +83,20 @@ impl M3uParser {
             tvg_country_re: Regex::new(r#"tvg-country="([^"]*)""#)?,
             tvg_language_re: Regex::new(r#"tvg-language="([^"]*)""#)?,
             group_re: Regex::new(r#"group-title="([^"]*)""#)?,
+            catchup_re: Regex::new(r#"catchup="([^"]*)""#)?,
+            catchup_source_re: Regex::new(r#"catchup-source="([^"]*)""#)?,
+            catchup_days_re: Regex::new(r#"catchup-days="([^"]*)""#)?,
+            tvg_shift_re: Regex::new(r#"tvg-shift="([^"]*)""#)?,
+            hls_name_re: Regex::new(r#"NAME="([^"]*)""#)?,
+            hls_resolution_re: Regex::new(r#"RESOLUTION=([0-9]+x[0-9]+)"#)?,
+            base_url: None,
         })
+    }
+
+    /// Set the playlist base URL used to resolve relative media URLs.
+    pub fn with_base_url(mut self, base: String) -> Self {
+        self.base_url = Some(base);
+        self
     }
 
     /// Extract attribute value from a line using regex
@@ -59,43 +104,71 @@ impl M3uParser {
         re.captures(line).map(|caps| caps[1].to_string())
     }
 
+    /// Resolve a (possibly relative) media URL against the playlist base URL.
+    fn resolve_url(&self, raw: &str) -> String {
+        let is_absolute = raw.starts_with("http://")
+            || raw.starts_with("https://")
+            || raw.starts_with("rtmp://")
+            || raw.starts_with("rtmps://")
+            || raw.starts_with("rtsp://")
+            || raw.starts_with("mms://")
+            || raw.starts_with("rtp://")
+            || raw.starts_with("udp://")
+            || raw.starts_with("srt://");
+        if is_absolute {
+            return raw.to_string();
+        }
+        if let Some(base) = &self.base_url {
+            if let Ok(b) = Url::parse(base) {
+                if let Ok(joined) = b.join(raw) {
+                    return joined.to_string();
+                }
+            }
+        }
+        raw.to_string()
+    }
+
     /// Feed a single (already-trimmed) line into the parser state machine.
     fn feed_line(
         &self,
         state: &mut M3uParseState,
-        trimmed: &str,
+        trimmed_in: &str,
         callback: &mut impl FnMut(M3uEntry) -> anyhow::Result<()>,
     ) -> anyhow::Result<()> {
-        // Non-comment, non-empty lines are media URLs.
-        if trimmed.is_empty() || !trimmed.starts_with('#') {
-            if !trimmed.is_empty() {
-                let name = state
-                    .current_name
-                    .clone()
-                    .or_else(|| state.current_tvg_name.clone())
-                    .unwrap_or_else(|| trimmed.to_string());
-                let entry = M3uEntry {
-                    name,
-                    url: trimmed.to_string(),
-                    icon: state.current_tvg_logo.clone(),
-                    group: state.current_group.clone(),
-                    tvg_id: state.current_tvg_id.clone(),
-                    tvg_name: state.current_tvg_name.clone(),
-                    tvg_logo: state.current_tvg_logo.clone(),
-                    tvg_country: state.current_tvg_country.clone(),
-                    tvg_language: state.current_tvg_language.clone(),
-                };
-                callback(entry)?;
-                state.count += 1;
+        // Strip a leading UTF-8 BOM (some editors emit one on the first line).
+        let trimmed = trimmed_in.trim_start_matches('\u{feff}');
 
-                // Reset per-entry state
-                state.current_name = None;
-                state.current_tvg_id = None;
-                state.current_tvg_name = None;
-                state.current_tvg_logo = None;
-                state.current_tvg_country = None;
-                state.current_tvg_language = None;
-            }
+        // Empty lines carry no information.
+        if trimmed.is_empty() {
+            return Ok(());
+        }
+
+        // Non-comment lines are media URLs.
+        if !trimmed.starts_with('#') {
+            let url = self.resolve_url(trimmed);
+            let name = state
+                .current_name
+                .clone()
+                .or_else(|| state.current_tvg_name.clone())
+                .unwrap_or_else(|| trimmed.to_string());
+            let entry = M3uEntry {
+                name,
+                url,
+                icon: state.current_tvg_logo.clone(),
+                group: state.current_group.clone(),
+                tvg_id: state.current_tvg_id.clone(),
+                tvg_name: state.current_tvg_name.clone(),
+                tvg_logo: state.current_tvg_logo.clone(),
+                tvg_country: state.current_tvg_country.clone(),
+                tvg_language: state.current_tvg_language.clone(),
+                catchup: state.current_catchup.clone(),
+                catchup_source: state.current_catchup_source.clone(),
+                catchup_days: state.current_catchup_days.clone(),
+                tvg_shift: state.current_tvg_shift.clone(),
+            };
+            callback(entry)?;
+            state.count += 1;
+            state.reset_entry();
             return Ok(());
         }
 
@@ -107,7 +180,8 @@ impl M3uParser {
 
         // #EXTINF: channel metadata line
         if trimmed.starts_with("#EXTINF") {
-            state.current_name = trimmed.rfind(',').map(|idx| trimmed[idx + 1..].trim().to_string());
+            state.current_name =
+                trimmed.rfind(',').map(|idx| trimmed[idx + 1..].trim().to_string());
 
             state.current_tvg_id = self.extract_attr(&self.tvg_id_re, trimmed);
             state.current_tvg_name = self.extract_attr(&self.tvg_name_re, trimmed);
@@ -118,6 +192,21 @@ impl M3uParser {
             if let Some(g) = self.extract_attr(&self.group_re, trimmed) {
                 state.current_group = Some(g);
             }
+            state.current_catchup = self.extract_attr(&self.catchup_re, trimmed);
+            state.current_catchup_source = self.extract_attr(&self.catchup_source_re, trimmed);
+            state.current_catchup_days = self.extract_attr(&self.catchup_days_re, trimmed);
+            state.current_tvg_shift = self.extract_attr(&self.tvg_shift_re, trimmed);
+            return Ok(());
+        }
+
+        // #EXT-X-STREAM-INF: HLS master playlist variant — the following line is the
+        // (relative) variant URL, so treat it as a channel with a derived name.
+        if trimmed.starts_with("#EXT-X-STREAM-INF") {
+            let name = self
+                .extract_attr(&self.hls_name_re, trimmed)
+                .or_else(|| self.extract_attr(&self.hls_resolution_re, trimmed));
+            state.current_name = name;
+            return Ok(());
         }
 
         Ok(())
@@ -174,16 +263,16 @@ mod tests {
     #[test]
     fn test_parse_simple_m3u() {
         let content = r#"#EXTM3U
-#EXTINF:-1 tvg-id="1" tvg-name="Test Channel" tvg-logo="http://example.com/logo.png" group-title="News",Test Channel
-http://example.com/stream.m3u8
-"#;
+ #EXTINF:-1 tvg-id="1" tvg-name="Test Channel" tvg-logo="http://example.com/logo.png" group-title="News",Test Channel
+ http://example.com/stream.m3u8
+ "#;
         let parser = M3uParser::new().unwrap();
         let mut entries = Vec::new();
         let count = parser.parse_string(content, |entry| {
             entries.push(entry);
             Ok(())
         }).unwrap();
-        
+
         assert_eq!(count, 1);
         assert_eq!(entries[0].name, "Test Channel");
         assert_eq!(entries[0].url, "http://example.com/stream.m3u8");
@@ -208,6 +297,63 @@ rtmp://example.com/live/match
         assert_eq!(entries[0].name, "Live Match");
         assert_eq!(entries[0].url, "rtmp://example.com/live/match");
         assert_eq!(entries[0].group, Some("Sports".to_string()));
+    }
+
+    #[test]
+    fn test_parse_catchup_and_shift() {
+        let content = r#"#EXTM3U
+#EXTINF:-1 tvg-id="3" tvg-shift="-2" catchup="append" catchup-days="7" catchup-source="?utc=${start}" group-title="Catchup",Catchup Chan
+http://example.com/c.m3u8
+"#;
+        let parser = M3uParser::new().unwrap();
+        let mut entries = Vec::new();
+        parser.parse_string(content, |entry| {
+            entries.push(entry);
+            Ok(())
+        }).unwrap();
+
+        assert_eq!(entries[0].tvg_shift, Some("-2".to_string()));
+        assert_eq!(entries[0].catchup, Some("append".to_string()));
+        assert_eq!(entries[0].catchup_days, Some("7".to_string()));
+        assert_eq!(entries[0].catchup_source, Some("?utc=${start}".to_string()));
+    }
+
+    #[test]
+    fn test_parse_bom_and_relative_urls() {
+        let content = "\u{feff}#EXTM3U\n#EXTINF:-1,Rel Chan\nplaylist/rel.m3u8\n";
+        let base = "http://example.com/tv/playlist.m3u";
+        let parser = M3uParser::new().unwrap().with_base_url(base.to_string());
+        let mut entries = Vec::new();
+        parser.parse_string(content, |entry| {
+            entries.push(entry);
+            Ok(())
+        }).unwrap();
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].name, "Rel Chan");
+        assert_eq!(entries[0].url, "http://example.com/tv/playlist/rel.m3u8");
+    }
+
+    #[test]
+    fn test_parse_hls_stream_inf() {
+        let content = r#"#EXTM3U
+#EXT-X-STREAM-INF:BANDWIDTH=1280000,RESOLUTION=640x360
+http://example.com/low/index.m3u8
+#EXT-X-STREAM-INF:NAME="HD 1080",BANDWIDTH=5000000,RESOLUTION=1920x1080
+http://example.com/hd/index.m3u8
+"#;
+        let parser = M3uParser::new().unwrap();
+        let mut entries = Vec::new();
+        parser.parse_string(content, |entry| {
+            entries.push(entry);
+            Ok(())
+        }).unwrap();
+
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].url, "http://example.com/low/index.m3u8");
+        assert_eq!(entries[0].name, "640x360");
+        assert_eq!(entries[1].url, "http://example.com/hd/index.m3u8");
+        assert_eq!(entries[1].name, "HD 1080");
     }
 
     #[tokio::test]

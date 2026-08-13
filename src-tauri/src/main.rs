@@ -34,21 +34,37 @@ mod app {
                 add_history,
                 get_history,
                 refresh_epg,
-                get_epg_programme,
+                get_epg_schedule,
                 launch_external_player,
             ])
             .run(tauri::generate_context!())
             .expect("error while running tauri application");
     }
 
-    /// Add an M3U playlist: stream-download, parse and store its channels
+    /// Add an M3U playlist: stream-download, parse and store its channels.
+    /// An optional `epg_url` links an XMLTV guide to the list.
     #[tauri::command]
-    async fn add_m3u_list(url: String, db: tauri::State<'_, Database>) -> Result<String, String> {
+    async fn add_m3u_list(
+        url: String,
+        epg_url: Option<String>,
+        db: tauri::State<'_, Database>,
+    ) -> Result<String, String> {
         let list_manager = ListManager::new(db.pool().clone());
         let _ = list_manager.add_list(&List::new(url.clone(), ListType::M3u)).await;
+        if let Some(epg) = &epg_url {
+            let _ = list_manager.set_epg_url(&url, epg).await;
+        }
+
+        // Derive the base URL to resolve relative media URLs.
+        let base = url
+            .rsplit_once('/')
+            .map(|(p, _)| p.to_string())
+            .unwrap_or_else(|| url.clone());
 
         let response = reqwest::get(&url).await.map_err(|e| e.to_string())?;
-        let parser = M3uParser::new().map_err(|e| e.to_string())?;
+        let parser = M3uParser::new()
+            .map_err(|e| e.to_string())?
+            .with_base_url(base);
 
         // Stream the response body and parse it incrementally to avoid loading
         // the whole playlist into memory.
@@ -176,14 +192,15 @@ mod app {
         ))
     }
 
-    /// Get the current EPG programme for a channel
+    /// Get the upcoming EPG schedule (current + future programmes) for a channel
     #[tauri::command]
-    async fn get_epg_programme(
-        channel_name: String,
+    async fn get_epg_schedule(
+        channel_id: String,
+        limit: i64,
         db: tauri::State<'_, Database>,
-    ) -> Result<Option<EpgProgramme>, String> {
+    ) -> Result<Vec<EpgProgramme>, String> {
         EpgManager::new(db.pool().clone())
-            .get_current_programme(&channel_name)
+            .get_schedule(&channel_id, limit)
             .await
             .map_err(|e| e.to_string())
     }

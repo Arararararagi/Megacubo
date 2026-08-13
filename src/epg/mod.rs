@@ -86,6 +86,23 @@ impl EpgManager {
         Ok(programme)
     }
 
+    /// Get the upcoming schedule for a channel (current + future programmes).
+    pub async fn get_schedule(&self, channel_name: &str, limit: i64) -> anyhow::Result<Vec<EpgProgramme>> {
+        let now = Utc::now().timestamp();
+        let programmes = sqlx::query_as::<_, EpgProgramme>(
+            "SELECT * FROM epg_programmes
+             WHERE channel_name = ? AND end_time >= ?
+             ORDER BY start_time LIMIT ?",
+        )
+        .bind(channel_name)
+        .bind(now)
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(programmes)
+    }
+
     /// Parse an XMLTV document and store its channels and programmes.
     /// Returns the number of `(channels, programmes)` stored. Existing data for
     /// `epg_url` is cleared first to avoid duplicates on refresh.

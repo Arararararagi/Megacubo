@@ -5,12 +5,485 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Megacubo</title>
     <style>
-      body { margin: 0; background: #14181f; color: #e6e6e6; font-family: sans-serif;
-             display: flex; align-items: center; justify-content: center; height: 100vh; }
-      h1 { font-weight: 600; }
+      :root {
+        --bg: #14181f;
+        --panel: #1c222c;
+        --panel-2: #232b38;
+        --accent: #3da9fc;
+        --accent-2: #2b7fc4;
+        --text: #e6e6e6;
+        --muted: #9aa4b2;
+        --danger: #ef6461;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0; background: var(--bg); color: var(--text);
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+        font-size: 14px;
+      }
+      header {
+        display: flex; align-items: center; gap: 12px;
+        padding: 12px 18px; background: var(--panel);
+        border-bottom: 1px solid #00000040;
+      }
+      header h1 { margin: 0; font-size: 18px; font-weight: 700; }
+      header .logo { color: var(--accent); }
+      .add-form { display: flex; gap: 8px; margin-left: auto; flex-wrap: wrap; }
+      .add-form input {
+        background: var(--panel-2); border: 1px solid #00000060; color: var(--text);
+        padding: 8px 10px; border-radius: 6px; min-width: 220px;
+      }
+      button {
+        background: var(--accent); color: #06121d; border: none; font-weight: 600;
+        padding: 8px 14px; border-radius: 6px; cursor: pointer;
+      }
+      button:hover { background: var(--accent-2); }
+      button.ghost { background: var(--panel-2); color: var(--text); }
+      button.ghost:hover { background: #2c3645; }
+      .tabs { display: flex; gap: 2px; padding: 0 18px; background: var(--panel); }
+      .tabs button {
+        background: transparent; color: var(--muted); border-radius: 0;
+        border-bottom: 2px solid transparent; padding: 10px 14px;
+      }
+      .tabs button.active { color: var(--text); border-bottom-color: var(--accent); }
+      .toolbar { display: flex; gap: 8px; padding: 12px 18px; align-items: center; }
+      .toolbar input {
+        background: var(--panel-2); border: 1px solid #00000060; color: var(--text);
+        padding: 8px 10px; border-radius: 6px; flex: 1; max-width: 420px;
+      }
+      select {
+        background: var(--panel-2); border: 1px solid #00000060; color: var(--text);
+        padding: 8px 10px; border-radius: 6px;
+      }
+      main { padding: 0 18px 28px; }
+      .status { color: var(--muted); padding: 0 18px 10px; min-height: 18px; }
+      .status.error { color: var(--danger); }
+      .grid {
+        display: grid; gap: 12px;
+        grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      }
+      .card {
+        background: var(--panel); border: 1px solid #00000040; border-radius: 10px;
+        padding: 10px; display: flex; flex-direction: column; gap: 8px;
+      }
+      .card .thumb {
+        width: 100%; height: 120px; object-fit: contain; background: #000;
+        border-radius: 6px;
+      }
+      .card .title { font-weight: 600; line-height: 1.2; }
+      .card .meta { color: var(--muted); font-size: 12px; }
+      .card .actions { display: flex; gap: 6px; margin-top: auto; flex-wrap: wrap; }
+      .card .actions button { padding: 6px 10px; font-size: 12px; }
+      .row {
+        display: flex; align-items: center; gap: 10px; padding: 10px 12px;
+        background: var(--panel); border-radius: 8px; margin-bottom: 8px;
+      }
+      .row .grow { flex: 1; min-width: 0; }
+      .row .name { font-weight: 600; }
+      .row .sub { color: var(--muted); font-size: 12px; }
+      .empty { color: var(--muted); padding: 24px 0; text-align: center; }
+      .epg-item { padding: 8px 12px; border-left: 3px solid var(--accent); margin-bottom: 6px; background: var(--panel); border-radius: 4px; }
+      .epg-item.now { border-left-color: #54d18a; }
+      .epg-item .t { color: var(--muted); font-size: 12px; }
+      .epg-item .ti { font-weight: 600; }
+      .epg-item .de { color: var(--muted); font-size: 12px; }
     </style>
   </head>
   <body>
-    <h1>Megacubo</h1>
+    <header>
+      <h1><span class="logo">◉</span> Megacubo</h1>
+      <form class="add-form" id="add-form">
+        <input id="list-url" type="url" placeholder="M3U playlist URL" required />
+        <input id="epg-url" type="url" placeholder="EPG URL (optional)" />
+        <button type="submit">Add Playlist</button>
+      </form>
+    </header>
+
+    <div class="tabs" id="tabs">
+      <button data-tab="channels" class="active">Channels</button>
+      <button data-tab="search">Search</button>
+      <button data-tab="bookmarks">Bookmarks</button>
+      <button data-tab="history">History</button>
+      <button data-tab="epg">EPG</button>
+    </div>
+
+    <div class="status" id="status"></div>
+
+    <main>
+      <section id="panel-channels">
+        <div class="toolbar">
+          <select id="list-select"></select>
+          <button class="ghost" id="refresh-epg">Load EPG</button>
+        </div>
+        <div class="grid" id="channels-grid"></div>
+      </section>
+
+      <section id="panel-search" hidden>
+        <div class="toolbar">
+          <input id="search-input" placeholder="Search channels by name or group…" />
+          <button id="search-btn">Search</button>
+        </div>
+        <div class="grid" id="search-grid"></div>
+      </section>
+
+      <section id="panel-bookmarks" hidden>
+        <div id="bookmarks-list"></div>
+      </section>
+
+      <section id="panel-history" hidden>
+        <div id="history-list"></div>
+      </section>
+
+      <section id="panel-epg" hidden>
+        <div class="toolbar">
+          <span id="epg-channel">Select a channel and click “EPG” to see its schedule.</span>
+        </div>
+        <div id="epg-list"></div>
+      </section>
+    </main>
+
+    <script>
+      const TAURI = window.__TAURI__;
+      const invoke = (cmd, args = {}) => TAURI.core.invoke(cmd, args);
+
+      const $ = (id) => document.getElementById(id);
+      const statusEl = $("status");
+      let lists = [];
+      let currentList = null;
+      let selectedChannel = null;
+
+      function setStatus(msg, isError = false) {
+        statusEl.textContent = msg || "";
+        statusEl.className = "status" + (isError ? " error" : "");
+      }
+
+      function fmtTime(ts) {
+        if (!ts) return "";
+        const d = new Date(ts * 1000);
+        return d.toLocaleString([], { weekday: "short", hour: "2-digit", minute: "2-digit" });
+      }
+
+      function iconFor(ch) {
+        return ch.icon || ch.tvg_logo || "";
+      }
+
+      function switchTab(name) {
+        document.querySelectorAll("#tabs button").forEach((b) =>
+          b.classList.toggle("active", b.dataset.tab === name)
+        );
+        document.querySelectorAll("main section").forEach((s) =>
+          (s.hidden = s.id !== "panel-" + name)
+        );
+      }
+
+      document.querySelectorAll("#tabs button").forEach((b) =>
+        b.addEventListener("click", () => switchTab(b.dataset.tab))
+      );
+
+      function channelCard(ch, onEpg) {
+        const card = document.createElement("div");
+        card.className = "card";
+
+        const icon = iconFor(ch);
+        if (icon) {
+          const img = document.createElement("img");
+          img.className = "thumb";
+          img.src = icon;
+          img.alt = "";
+          img.onerror = () => (img.style.display = "none");
+          card.appendChild(img);
+        }
+
+        const title = document.createElement("div");
+        title.className = "title";
+        title.textContent = ch.name;
+        card.appendChild(title);
+
+        const meta = document.createElement("div");
+        meta.className = "meta";
+        meta.textContent = [ch.group_title, ch.tvg_country]
+          .filter(Boolean)
+          .join(" · ");
+        card.appendChild(meta);
+
+        const actions = document.createElement("div");
+        actions.className = "actions";
+
+        const play = document.createElement("button");
+        play.textContent = "Play";
+        play.onclick = () => playChannel(ch);
+        actions.appendChild(play);
+
+        const bm = document.createElement("button");
+        bm.className = "ghost";
+        bm.textContent = "Bookmark";
+        bm.onclick = () => bookmarkChannel(ch);
+        actions.appendChild(bm);
+
+        const epg = document.createElement("button");
+        epg.className = "ghost";
+        epg.textContent = "EPG";
+        epg.onclick = () => {
+          selectedChannel = ch;
+          switchTab("epg");
+          showEpg(ch);
+        };
+        actions.appendChild(epg);
+
+        card.appendChild(actions);
+        return card;
+      }
+
+      function simpleRow(ch) {
+        const row = document.createElement("div");
+        row.className = "row";
+        const grow = document.createElement("div");
+        grow.className = "grow";
+        const name = document.createElement("div");
+        name.className = "name";
+        name.textContent = ch.name || ch.channel_name;
+        const sub = document.createElement("div");
+        sub.className = "sub";
+        sub.textContent = ch.url || ch.channel_url || "";
+        grow.appendChild(name);
+        grow.appendChild(sub);
+        row.appendChild(grow);
+
+        const play = document.createElement("button");
+        play.textContent = "Play";
+        play.onclick = () => playChannel(ch);
+        row.appendChild(play);
+        return row;
+      }
+
+      async function playChannel(ch) {
+        const url = ch.url || ch.channel_url;
+        const name = ch.name || ch.channel_name;
+        const icon = iconFor(ch) || ch.icon;
+        try {
+          await invoke("launch_external_player", { url });
+          await invoke("add_history", {
+            channelName: name,
+            channelUrl: url,
+            icon: icon || null,
+            duration: null,
+          });
+          if (currentTab() === "history") loadHistory();
+        } catch (e) {
+          setStatus("Failed to play: " + e, true);
+        }
+      }
+
+      async function bookmarkChannel(ch) {
+        try {
+          await invoke("add_bookmark", {
+            channelName: ch.name,
+            channelUrl: ch.url,
+            icon: iconFor(ch) || null,
+          });
+          setStatus("Bookmarked " + ch.name);
+          if (currentTab() === "bookmarks") loadBookmarks();
+        } catch (e) {
+          setStatus("Failed to bookmark: " + e, true);
+        }
+      }
+
+      async function showEpg(ch) {
+        const id = ch.tvg_id || ch.name;
+        $("epg-channel").textContent = "EPG for " + (ch.name || id);
+        $("epg-list").innerHTML = "";
+        try {
+          const progs = await invoke("get_epg_schedule", { channelId: id, limit: 30 });
+          if (!progs.length) {
+            $("epg-list").innerHTML = '<div class="empty">No EPG data for this channel.</div>';
+            return;
+          }
+          const now = Math.floor(Date.now() / 1000);
+          progs.forEach((p) => {
+            const item = document.createElement("div");
+            const isNow = p.start_time <= now && p.end_time >= now;
+            item.className = "epg-item" + (isNow ? " now" : "");
+            const t = document.createElement("div");
+            t.className = "t";
+            t.textContent = fmtTime(p.start_time) + " – " + fmtTime(p.end_time);
+            const ti = document.createElement("div");
+            ti.className = "ti";
+            ti.textContent = p.title;
+            item.appendChild(t);
+            item.appendChild(ti);
+            if (p.description) {
+              const de = document.createElement("div");
+              de.className = "de";
+              de.textContent = p.description;
+              item.appendChild(de);
+            }
+            $("epg-list").appendChild(item);
+          });
+        } catch (e) {
+          setStatus("Failed to load EPG: " + e, true);
+        }
+      }
+
+      async function loadLists() {
+        try {
+          lists = await invoke("get_lists");
+          const sel = $("list-select");
+          sel.innerHTML = "";
+          if (!lists.length) {
+            sel.innerHTML = "<option>No playlists yet — add one above.</option>";
+            $("channels-grid").innerHTML = "";
+            return;
+          }
+          lists.forEach((l) => {
+            const o = document.createElement("option");
+            o.value = l.url;
+            o.textContent = (l.name || l.url) + (l.epg_url ? " (EPG)" : "");
+            sel.appendChild(o);
+          });
+          currentList = lists[0];
+          sel.value = currentList.url;
+          await loadChannels(currentList.url);
+        } catch (e) {
+          setStatus("Failed to load lists: " + e, true);
+        }
+      }
+
+      async function loadChannels(url) {
+        try {
+          setStatus("Loading channels…");
+          const channels = await invoke("get_channels", { listUrl: url });
+          const grid = $("channels-grid");
+          grid.innerHTML = "";
+          if (!channels.length) {
+            grid.innerHTML = '<div class="empty">No channels. Add a playlist or click “Load EPG”? Channels come from M3U playlists.</div>';
+            setStatus("");
+            return;
+          }
+          channels.forEach((ch) => grid.appendChild(channelCard(ch)));
+          setStatus(channels.length + " channels");
+        } catch (e) {
+          setStatus("Failed to load channels: " + e, true);
+        }
+      }
+
+      $("list-select").addEventListener("change", (e) => {
+        currentList = lists.find((l) => l.url === e.target.value) || null;
+        loadChannels(e.target.value);
+      });
+
+      $("refresh-epg").addEventListener("click", async () => {
+        if (!currentList || !currentList.epg_url) {
+          setStatus("This playlist has no EPG URL. Add one when creating the playlist.", true);
+          return;
+        }
+        try {
+          setStatus("Fetching EPG…");
+          const msg = await invoke("refresh_epg", {
+            listUrl: currentList.url,
+            epgUrl: currentList.epg_url,
+          });
+          setStatus(msg);
+        } catch (e) {
+          setStatus("EPG refresh failed: " + e, true);
+        }
+      });
+
+      $("add-form").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const url = $("list-url").value.trim();
+        const epg = $("epg-url").value.trim();
+        if (!url) return;
+        try {
+          setStatus("Adding playlist…");
+          const msg = await invoke("add_m3u_list", {
+            url,
+            epgUrl: epg || null,
+          });
+          setStatus(msg);
+          $("list-url").value = "";
+          $("epg-url").value = "";
+          await loadLists();
+        } catch (e) {
+          setStatus("Failed to add playlist: " + e, true);
+        }
+      });
+
+      async function doSearch() {
+        const q = $("search-input").value.trim();
+        if (!q) return;
+        try {
+          setStatus("Searching…");
+          const results = await invoke("search_channels", { query: q, limit: 200 });
+          const grid = $("search-grid");
+          grid.innerHTML = "";
+          if (!results.length) {
+            grid.innerHTML = '<div class="empty">No results.</div>';
+            setStatus("");
+            return;
+          }
+          results.forEach((ch) => grid.appendChild(channelCard(ch)));
+          setStatus(results.length + " results");
+        } catch (e) {
+          setStatus("Search failed: " + e, true);
+        }
+      }
+      $("search-btn").addEventListener("click", doSearch);
+      $("search-input").addEventListener("keydown", (e) => {
+        if (e.key === "Enter") doSearch();
+      });
+
+      async function loadBookmarks() {
+        try {
+          const bms = await invoke("get_bookmarks");
+          const list = $("bookmarks-list");
+          list.innerHTML = "";
+          if (!bms.length) {
+            list.innerHTML = '<div class="empty">No bookmarks yet.</div>';
+            return;
+          }
+          bms.forEach((b) => list.appendChild(simpleRow({ name: b[0], url: b[1], icon: b[2] })));
+        } catch (e) {
+          setStatus("Failed to load bookmarks: " + e, true);
+        }
+      }
+
+      async function loadHistory() {
+        try {
+          const hist = await invoke("get_history", { limit: 50 });
+          const list = $("history-list");
+          list.innerHTML = "";
+          if (!hist.length) {
+            list.innerHTML = '<div class="empty">No history yet.</div>';
+            return;
+          }
+          hist.forEach((h) =>
+            list.appendChild(simpleRow({ name: h[0], url: h[1], icon: h[2] }))
+          );
+        } catch (e) {
+          setStatus("Failed to load history: " + e, true);
+        }
+      }
+
+      function currentTab() {
+        const a = document.querySelector("#tabs button.active");
+        return a ? a.dataset.tab : "channels";
+      }
+      document.querySelectorAll("#tabs button").forEach((b) =>
+        b.addEventListener("click", () => {
+          const t = b.dataset.tab;
+          if (t === "bookmarks") loadBookmarks();
+          if (t === "history") loadHistory();
+        })
+      );
+
+      // Boot
+      (async () => {
+        try {
+          await loadLists();
+        } catch (e) {
+          setStatus("Initialization error: " + e, true);
+        }
+      })();
+    </script>
   </body>
 </html>

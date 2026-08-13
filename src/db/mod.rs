@@ -15,6 +15,15 @@ pub struct Channel {
     pub url: String,
     pub icon: Option<String>,
     pub group_title: Option<String>,
+    pub tvg_id: Option<String>,
+    pub tvg_name: Option<String>,
+    pub tvg_logo: Option<String>,
+    pub tvg_country: Option<String>,
+    pub tvg_language: Option<String>,
+    pub catchup: Option<String>,
+    pub catchup_source: Option<String>,
+    pub catchup_days: Option<String>,
+    pub tvg_shift: Option<String>,
 }
 
 /// Database manager for Megacubo
@@ -44,6 +53,9 @@ impl Database {
 
         // Create tables
         Self::create_tables(&pool).await?;
+
+        // Migrate older databases that may be missing recently-added columns.
+        Self::migrate(&pool).await?;
 
         info!("Database initialized at {:?}", db_path);
 
@@ -221,6 +233,28 @@ impl Database {
         Ok(())
     }
 
+    /// Add columns that may be missing on databases created by an earlier build.
+    async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
+        for col in [
+            "tvg_id TEXT",
+            "tvg_name TEXT",
+            "tvg_logo TEXT",
+            "tvg_country TEXT",
+            "tvg_language TEXT",
+            "catchup TEXT",
+            "catchup_source TEXT",
+            "catchup_days TEXT",
+            "tvg_shift TEXT",
+        ] {
+            let name = col.split_whitespace().next().unwrap();
+            let _ = sqlx::query(&format!("ALTER TABLE channels ADD COLUMN {}", col))
+                .execute(pool)
+                .await
+                .map_err(|e| tracing::debug!("migrate channels.{}: {}", name, e));
+        }
+        Ok(())
+    }
+
     /// Get a reference to the connection pool
     pub fn pool(&self) -> &SqlitePool {
         &self.pool
@@ -235,8 +269,9 @@ impl Database {
             INSERT OR IGNORE INTO channels (
                 list_url, name, url, icon, group_title,
                 tvg_id, tvg_name, tvg_logo, tvg_country, tvg_language,
+                catchup, catchup_source, catchup_days, tvg_shift,
                 created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(list_url)
@@ -249,6 +284,10 @@ impl Database {
         .bind(&entry.tvg_logo)
         .bind(&entry.tvg_country)
         .bind(&entry.tvg_language)
+        .bind(&entry.catchup)
+        .bind(&entry.catchup_source)
+        .bind(&entry.catchup_days)
+        .bind(&entry.tvg_shift)
         .bind(now)
         .bind(now)
         .execute(&self.pool)
@@ -260,7 +299,9 @@ impl Database {
     /// Get channels for a list with pagination
     pub async fn get_channels(&self, list_url: &str, limit: i64, offset: i64) -> anyhow::Result<Vec<Channel>> {
         let rows = sqlx::query_as::<_, Channel>(
-            "SELECT id, list_url, name, url, icon, group_title \
+            "SELECT id, list_url, name, url, icon, group_title, \
+                    tvg_id, tvg_name, tvg_logo, tvg_country, tvg_language, \
+                    catchup, catchup_source, catchup_days, tvg_shift \
              FROM channels WHERE list_url = ? ORDER BY name LIMIT ? OFFSET ?",
         )
         .bind(list_url)
@@ -341,7 +382,9 @@ impl Database {
     pub async fn search_channels(&self, query: &str, limit: i64) -> anyhow::Result<Vec<Channel>> {
         let pattern = format!("%{}%", query);
         let rows = sqlx::query_as::<_, Channel>(
-            "SELECT id, list_url, name, url, icon, group_title \
+            "SELECT id, list_url, name, url, icon, group_title, \
+                    tvg_id, tvg_name, tvg_logo, tvg_country, tvg_language, \
+                    catchup, catchup_source, catchup_days, tvg_shift \
              FROM channels WHERE name LIKE ? OR group_title LIKE ? ORDER BY name LIMIT ?",
         )
         .bind(&pattern)
@@ -382,6 +425,10 @@ mod tests {
             tvg_logo: None,
             tvg_country: None,
             tvg_language: None,
+            catchup: None,
+            catchup_source: None,
+            catchup_days: None,
+            tvg_shift: None,
         };
         let list_url = "http://example.com/playlist.m3u";
 
@@ -408,14 +455,14 @@ mod tests {
             url: "http://example.com/1".to_string(),
             icon: None,
             group: Some("News".to_string()),
-            tvg_id: None, tvg_name: None, tvg_logo: None, tvg_country: None, tvg_language: None,
+            tvg_id: None, tvg_name: None, tvg_logo: None, tvg_country: None, tvg_language: None, catchup: None, catchup_source: None, catchup_days: None, tvg_shift: None,
         };
         let b = M3uEntry {
             name: "Sports Two".to_string(),
             url: "http://example.com/2".to_string(),
             icon: None,
             group: Some("Sports".to_string()),
-            tvg_id: None, tvg_name: None, tvg_logo: None, tvg_country: None, tvg_language: None,
+            tvg_id: None, tvg_name: None, tvg_logo: None, tvg_country: None, tvg_language: None, catchup: None, catchup_source: None, catchup_days: None, tvg_shift: None,
         };
         db.insert_channel(&a, "list").await.unwrap();
         db.insert_channel(&b, "list").await.unwrap();
