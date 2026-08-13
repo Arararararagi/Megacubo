@@ -336,6 +336,22 @@ impl Database {
 
         Ok(rows)
     }
+
+    /// Search channels by name or group (case-insensitive substring)
+    pub async fn search_channels(&self, query: &str, limit: i64) -> anyhow::Result<Vec<Channel>> {
+        let pattern = format!("%{}%", query);
+        let rows = sqlx::query_as::<_, Channel>(
+            "SELECT id, list_url, name, url, icon, group_title \
+             FROM channels WHERE name LIKE ? OR group_title LIKE ? ORDER BY name LIMIT ?",
+        )
+        .bind(&pattern)
+        .bind(&pattern)
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows)
+    }
 }
 
 /// Get the default database path
@@ -377,6 +393,47 @@ mod tests {
         assert_eq!(channels[0].name, "Test Channel");
         assert_eq!(channels[0].url, "http://example.com/stream.m3u8");
         assert_eq!(channels[0].group_title.as_deref(), Some("News"));
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[tokio::test]
+    async fn test_search_bookmarks_history() {
+        let path = std::env::temp_dir().join(format!("megacubo_sh_{}.db", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let db = Database::new(path.clone()).await.unwrap();
+
+        let a = M3uEntry {
+            name: "News One".to_string(),
+            url: "http://example.com/1".to_string(),
+            icon: None,
+            group: Some("News".to_string()),
+            tvg_id: None, tvg_name: None, tvg_logo: None, tvg_country: None, tvg_language: None,
+        };
+        let b = M3uEntry {
+            name: "Sports Two".to_string(),
+            url: "http://example.com/2".to_string(),
+            icon: None,
+            group: Some("Sports".to_string()),
+            tvg_id: None, tvg_name: None, tvg_logo: None, tvg_country: None, tvg_language: None,
+        };
+        db.insert_channel(&a, "list").await.unwrap();
+        db.insert_channel(&b, "list").await.unwrap();
+
+        let results = db.search_channels("news", 10).await.unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].name, "News One");
+
+        db.add_bookmark("News One", "http://example.com/1", None).await.unwrap();
+        let bookmarks = db.get_bookmarks().await.unwrap();
+        assert_eq!(bookmarks.len(), 1);
+        assert_eq!(bookmarks[0].0, "News One");
+
+        db.add_history("News One", "http://example.com/1", None, Some(120)).await.unwrap();
+        let history = db.get_history(10).await.unwrap();
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].0, "News One");
+        assert!(history[0].3 > 0, "played_at should be a timestamp");
 
         let _ = std::fs::remove_file(&path);
     }

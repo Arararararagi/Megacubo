@@ -1,6 +1,7 @@
 use std::io::BufRead;
 use regex::Regex;
 use tracing::info;
+use tokio::io::{AsyncRead, AsyncBufReadExt};
 
 /// M3U entry representing a channel
 #[derive(Debug, Clone)]
@@ -14,6 +15,19 @@ pub struct M3uEntry {
     pub tvg_logo: Option<String>,
     pub tvg_country: Option<String>,
     pub tvg_language: Option<String>,
+}
+
+/// Mutable accumulator for the streaming line processor.
+#[derive(Default)]
+struct M3uParseState {
+    count: usize,
+    current_name: Option<String>,
+    current_group: Option<String>,
+    current_tvg_id: Option<String>,
+    current_tvg_name: Option<String>,
+    current_tvg_logo: Option<String>,
+    current_tvg_country: Option<String>,
+    current_tvg_language: Option<String>,
 }
 
 /// M3U parser with streaming support
@@ -45,80 +59,99 @@ impl M3uParser {
         re.captures(line).map(|caps| caps[1].to_string())
     }
 
-    /// Parse an M3U file from a reader, calling the callback for each entry
-    pub fn parse<R: BufRead>(&self, reader: R, mut callback: impl FnMut(M3uEntry) -> anyhow::Result<()>) -> anyhow::Result<usize> {
-        let mut count = 0;
-        let mut current_name: Option<String> = None;
-        let mut current_group: Option<String> = None;
-        let mut current_tvg_id: Option<String> = None;
-        let mut current_tvg_name: Option<String> = None;
-        let mut current_tvg_logo: Option<String> = None;
-        let mut current_tvg_country: Option<String> = None;
-        let mut current_tvg_language: Option<String> = None;
+    /// Feed a single (already-trimmed) line into the parser state machine.
+    fn feed_line(
+        &self,
+        state: &mut M3uParseState,
+        trimmed: &str,
+        callback: &mut impl FnMut(M3uEntry) -> anyhow::Result<()>,
+    ) -> anyhow::Result<()> {
+        // Non-comment, non-empty lines are media URLs.
+        if trimmed.is_empty() || !trimmed.starts_with('#') {
+            if !trimmed.is_empty() {
+                let name = state
+                    .current_name
+                    .clone()
+                    .or_else(|| state.current_tvg_name.clone())
+                    .unwrap_or_else(|| trimmed.to_string());
+                let entry = M3uEntry {
+                    name,
+                    url: trimmed.to_string(),
+                    icon: state.current_tvg_logo.clone(),
+                    group: state.current_group.clone(),
+                    tvg_id: state.current_tvg_id.clone(),
+                    tvg_name: state.current_tvg_name.clone(),
+                    tvg_logo: state.current_tvg_logo.clone(),
+                    tvg_country: state.current_tvg_country.clone(),
+                    tvg_language: state.current_tvg_language.clone(),
+                };
+                callback(entry)?;
+                state.count += 1;
 
-        for line_result in reader.lines() {
-            let line = line_result?;
-            let trimmed = line.trim();
-
-            // Skip empty lines and comments
-            if trimmed.is_empty() || !trimmed.starts_with('#') {
-                // This is a URL line - create an entry for it
-                if !trimmed.is_empty() {
-                    let name = current_name
-                        .clone()
-                        .or_else(|| current_tvg_name.clone())
-                        .unwrap_or_else(|| trimmed.to_string());
-                    let entry = M3uEntry {
-                        name,
-                        url: trimmed.to_string(),
-                        icon: current_tvg_logo.clone(),
-                        group: current_group.clone(),
-                        tvg_id: current_tvg_id.clone(),
-                        tvg_name: current_tvg_name.clone(),
-                        tvg_logo: current_tvg_logo.clone(),
-                        tvg_country: current_tvg_country.clone(),
-                        tvg_language: current_tvg_language.clone(),
-                    };
-                    callback(entry)?;
-                    count += 1;
-
-                    // Reset for next entry
-                    current_name = None;
-                    current_tvg_id = None;
-                    current_tvg_name = None;
-                    current_tvg_logo = None;
-                    current_tvg_country = None;
-                    current_tvg_language = None;
-                }
-                continue;
+                // Reset per-entry state
+                state.current_name = None;
+                state.current_tvg_id = None;
+                state.current_tvg_name = None;
+                state.current_tvg_logo = None;
+                state.current_tvg_country = None;
+                state.current_tvg_language = None;
             }
+            return Ok(());
+        }
 
-            // #EXTGRP: sets the group for subsequent entries (alternative to group-title)
-            if trimmed.starts_with("#EXTGRP") {
-                current_group = trimmed.splitn(2, ':').nth(1).map(|s| s.trim().to_string());
-                continue;
-            }
+        // #EXTGRP: sets the group for subsequent entries (alternative to group-title)
+        if trimmed.starts_with("#EXTGRP") {
+            state.current_group = trimmed.splitn(2, ':').nth(1).map(|s| s.trim().to_string());
+            return Ok(());
+        }
 
-            // Parse EXTINF line
-            if trimmed.starts_with("#EXTINF") {
-                // The display name is everything after the last comma
-                current_name = trimmed.rfind(',').map(|idx| trimmed[idx + 1..].trim().to_string());
+        // #EXTINF: channel metadata line
+        if trimmed.starts_with("#EXTINF") {
+            state.current_name = trimmed.rfind(',').map(|idx| trimmed[idx + 1..].trim().to_string());
 
-                // Extract attributes
-                current_tvg_id = self.extract_attr(&self.tvg_id_re, trimmed);
-                current_tvg_name = self.extract_attr(&self.tvg_name_re, trimmed);
-                current_tvg_logo = self.extract_attr(&self.tvg_logo_re, trimmed);
-                current_tvg_country = self.extract_attr(&self.tvg_country_re, trimmed);
-                current_tvg_language = self.extract_attr(&self.tvg_language_re, trimmed);
-                // Only override the group if this entry specifies one (so #EXTGRP is preserved)
-                if let Some(g) = self.extract_attr(&self.group_re, trimmed) {
-                    current_group = Some(g);
-                }
+            state.current_tvg_id = self.extract_attr(&self.tvg_id_re, trimmed);
+            state.current_tvg_name = self.extract_attr(&self.tvg_name_re, trimmed);
+            state.current_tvg_logo = self.extract_attr(&self.tvg_logo_re, trimmed);
+            state.current_tvg_country = self.extract_attr(&self.tvg_country_re, trimmed);
+            state.current_tvg_language = self.extract_attr(&self.tvg_language_re, trimmed);
+            // Only override the group if this entry specifies one (so #EXTGRP is preserved)
+            if let Some(g) = self.extract_attr(&self.group_re, trimmed) {
+                state.current_group = Some(g);
             }
         }
 
-        info!("Parsed {} M3U entries", count);
-        Ok(count)
+        Ok(())
+    }
+
+    /// Parse an M3U file from a synchronous reader, calling the callback for each entry
+    pub fn parse<R: BufRead>(
+        &self,
+        reader: R,
+        mut callback: impl FnMut(M3uEntry) -> anyhow::Result<()>,
+    ) -> anyhow::Result<usize> {
+        let mut state = M3uParseState::default();
+        for line_result in reader.lines() {
+            let line = line_result?;
+            self.feed_line(&mut state, line.trim(), &mut callback)?;
+        }
+        info!("Parsed {} M3U entries", state.count);
+        Ok(state.count)
+    }
+
+    /// Parse an M3U stream from an async reader (e.g. a network response), calling the
+    /// callback for each entry as it is read. Avoids holding the whole document in memory.
+    pub async fn parse_stream<R: AsyncRead + Unpin>(
+        &self,
+        reader: R,
+        mut callback: impl FnMut(M3uEntry) -> anyhow::Result<()>,
+    ) -> anyhow::Result<usize> {
+        let mut state = M3uParseState::default();
+        let mut lines = tokio::io::BufReader::new(reader).lines();
+        while let Some(line) = lines.next_line().await? {
+            self.feed_line(&mut state, line.trim(), &mut callback)?;
+        }
+        info!("Parsed {} M3U entries (streamed)", state.count);
+        Ok(state.count)
     }
 
     /// Parse M3U content from a string
@@ -175,5 +208,25 @@ rtmp://example.com/live/match
         assert_eq!(entries[0].name, "Live Match");
         assert_eq!(entries[0].url, "rtmp://example.com/live/match");
         assert_eq!(entries[0].group, Some("Sports".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_parse_stream() {
+        let content = "#EXTM3U\n#EXTINF:-1,Chan A\nhttp://example.com/a\n#EXTINF:-1,Chan B\nrtmp://example.com/b\n";
+        let parser = M3uParser::new().unwrap();
+        let mut entries = Vec::new();
+        let count = parser
+            .parse_stream(content.as_bytes(), |entry| {
+                entries.push(entry);
+                Ok(())
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(count, 2);
+        assert_eq!(entries[0].name, "Chan A");
+        assert_eq!(entries[0].url, "http://example.com/a");
+        assert_eq!(entries[1].name, "Chan B");
+        assert_eq!(entries[1].url, "rtmp://example.com/b");
     }
 }

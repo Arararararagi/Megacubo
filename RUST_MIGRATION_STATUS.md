@@ -54,7 +54,9 @@ Rewrite the Electron/JS-based Megacubo IPTV player in Rust, using **Tauri v2** a
 ### 3.4 EPG, storage & parser hardening (Sprint A progress)
 - **EPG XMLTV parser**: added `epg::parse_xmltv` — a streaming `quick-xml` reader producing `XmltvChannel`/`XmltvProgramme` (was the only unused dependency). `EpgManager::parse_and_store` bulk-inserts channels + programmes in a transaction (clears the previous `epg_url` first). Previously only `parse_xmltv_time` + ad-hoc programme storage existed.
 - **M3U parser hardening**: added `#EXTGRP:` group support (preserved across the following `#EXTINF` unless overridden by `group-title`); display name after the comma; non-`http` URLs already accepted.
-- **Bookmarks / History storage**: `Database` gained `add_bookmark` / `get_bookmarks` / `add_history` / `get_history`.
+- **Bookmarks / History storage**: `Database` gained `add_bookmark` / `get_bookmarks` / `add_history` / `get_history`, plus `search_channels` (LIKE on name/group).
+- **Streaming download**: `M3uParser::parse_stream` parses an `AsyncRead` incrementally (used by `add_m3u_list` via a `StreamReader` over the reqwest byte stream) — avoids loading the whole playlist into memory.
+- **Tauri commands wired**: `add_m3u_list` (streaming), `get_lists`, `get_channels`, `search_channels`, `add_bookmark`/`get_bookmarks`, `add_history`/`get_history`, `refresh_epg` (fetch + `EpgManager::parse_and_store`, sets list EPG URL), `get_epg_programme`, `launch_external_player`. `ListManager` gained `set_epg_url` / `get_by_url`.
 
 ## 4. Build & Run Status
 | Command | Result |
@@ -62,17 +64,16 @@ Rewrite the Electron/JS-based Megacubo IPTV player in Rust, using **Tauri v2** a
 | `cargo build` (default) | ✅ compiles; fallback bin prints a hint |
 | `cargo check` | ✅ passes |
 | `cargo build --features desktop` | ✅ compiles the GUI binary |
-| `cargo test --lib` | ✅ 5 tests pass |
+| `cargo test --lib` | ✅ 7 tests pass |
 | `cargo run --features desktop` | launches the native window (placeholder page) |
 
 **Constraint**: the `desktop` binary needs the `dist/` frontend to exist at build time (placeholder provided). Real UI is a later phase.
 
 ## 5. Known Gaps / Limitations
-- **EPG**: XMLTV parse + store is implemented, but not yet wired to list EPG URLs (no scheduled/background refresh, no progress reporting).
+- **EPG**: `refresh_epg` exists but there's no scheduled/background auto-refresh or progress reporting yet.
 - **M3U parser**: `#EXTGRP` done; still missing `catchup*`/`tvg-shift` attributes, HLS `#EXT-X-STREAM-INF` nested playlists, UTF-8 BOM/encoding handling, relative-URL resolution, entries without `#EXTINF`.
 - **No Xtream / MAG** support (only M3U type in `ListManager`).
 - **Discovery** has local CRUD only — no cloud fetch / health scoring.
-- **Bookmarks / History** storage exists but isn't exposed via Tauri commands or a manager API yet.
 - **Playback**: only URL probing + external-player launch; **no libmpv** integration (`media` feature unbuilt).
 - **Android**: explicitly out of scope (desktop-only app).
 - **UI**: placeholder page only; no Svelte/frontend wired (`devUrl`/`frontendDist` point at a stub).
@@ -82,12 +83,12 @@ Rewrite the Electron/JS-based Megacubo IPTV player in Rust, using **Tauri v2** a
 
 ### Sprint A — Core ingestion & EPG (in progress)
 - ✅ **EPG XMLTV streaming parser** with `quick-xml`, bulk-insert into `EpgManager`.
-- ✅ **M3U parser `#EXTGRP`** + display-name/non-`http` handling (remaining: `catchup`/`tvg-shift`, HLS nested, BOM, relative URLs).
-- ✅ **Bookmarks/History** storage methods.
-1. **Streaming download** (reqwest stream → line reader) for large playlists.
-2. **Wire EPG to lists**: store/refresh EPG per list URL, expose via Tauri commands.
-3. **Bookmarks/History Tauri commands** + a manager wrapper.
-4. Finish **M3U edge cases** (`catchup*`, `#EXT-X-STREAM-INF`, BOM, relative URLs).
+- ✅ **M3U parser `#EXTGRP`** + display-name/non-`http` handling.
+- ✅ **Bookmarks/History** storage + Tauri commands.
+- ✅ **Streaming download** (reqwest byte stream → `AsyncRead` → `parse_stream`).
+- ✅ **EPG-to-list wiring** (`refresh_epg` command + `ListManager::set_epg_url`).
+- ✅ **Search** (`search_channels` + Tauri command).
+1. Finish **M3U edge cases** (`catchup*`, `#EXT-X-STREAM-INF`, BOM, relative URLs, entries without `#EXTINF`).
 
 ### Sprint B — Phase 2 parity
 5. **Xtream** (`player_api.php`) + **MAG** (portal) playlist support.

@@ -6,6 +6,7 @@
 #[cfg(feature = "desktop")]
 mod app {
     use tauri::Manager;
+    use futures_util::TryStreamExt;
     use megacubo::{
         Database, default_db_path, M3uParser,
         ListManager, Streamer,
@@ -27,6 +28,12 @@ mod app {
                 add_m3u_list,
                 get_lists,
                 get_channels,
+                search_channels,
+                add_bookmark,
+                get_bookmarks,
+                add_history,
+                get_history,
+                refresh_epg,
                 get_epg_programme,
                 launch_external_player,
             ])
@@ -34,24 +41,29 @@ mod app {
             .expect("error while running tauri application");
     }
 
-    /// Add an M3U playlist: download, parse and store its channels
+    /// Add an M3U playlist: stream-download, parse and store its channels
     #[tauri::command]
     async fn add_m3u_list(url: String, db: tauri::State<'_, Database>) -> Result<String, String> {
         let list_manager = ListManager::new(db.pool().clone());
-        let _ = list_manager
-            .add_list(&List::new(url.clone(), ListType::M3u))
-            .await;
+        let _ = list_manager.add_list(&List::new(url.clone(), ListType::M3u)).await;
 
         let response = reqwest::get(&url).await.map_err(|e| e.to_string())?;
-        let content = response.text().await.map_err(|e| e.to_string())?;
-
         let parser = M3uParser::new().map_err(|e| e.to_string())?;
+
+        // Stream the response body and parse it incrementally to avoid loading
+        // the whole playlist into memory.
+        let stream = response
+            .bytes_stream()
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e));
+        let reader = tokio_util::io::StreamReader::new(Box::pin(stream));
+
         let mut entries: Vec<M3uEntry> = Vec::new();
         parser
-            .parse_string(&content, |entry| {
+            .parse_stream(reader, |entry| {
                 entries.push(entry);
                 Ok(())
             })
+            .await
             .map_err(|e| e.to_string())?;
 
         let count = entries.len();
@@ -60,12 +72,8 @@ mod app {
         }
 
         let status = if count > 0 { ListStatus::Loaded } else { ListStatus::Error };
-        let err = if count == 0 {
-            Some("no channels parsed".to_string())
-        } else {
-            None
-        };
-        let _ = list_manager.update_status(&url, status, err.as_deref()).await;
+        let err = if count == 0 { Some("no channels parsed") } else { None };
+        let _ = list_manager.update_status(&url, status, err).await;
 
         Ok(format!("Parsed {} channels from {}", count, url))
     }
@@ -88,6 +96,84 @@ mod app {
         db.get_channels(&list_url, 100, 0)
             .await
             .map_err(|e| e.to_string())
+    }
+
+    /// Search channels by name or group
+    #[tauri::command]
+    async fn search_channels(
+        query: String,
+        db: tauri::State<'_, Database>,
+    ) -> Result<Vec<Channel>, String> {
+        db.search_channels(&query, 100).await.map_err(|e| e.to_string())
+    }
+
+    /// Add a bookmark for a channel
+    #[tauri::command]
+    async fn add_bookmark(
+        channel_name: String,
+        channel_url: String,
+        icon: Option<String>,
+        db: tauri::State<'_, Database>,
+    ) -> Result<(), String> {
+        db.add_bookmark(&channel_name, &channel_url, icon.as_deref())
+            .await
+            .map_err(|e| e.to_string())
+    }
+
+    /// Get all bookmarks
+    #[tauri::command]
+    async fn get_bookmarks(
+        db: tauri::State<'_, Database>,
+    ) -> Result<Vec<(String, String, Option<String>)>, String> {
+        db.get_bookmarks().await.map_err(|e| e.to_string())
+    }
+
+    /// Record a played channel in history
+    #[tauri::command]
+    async fn add_history(
+        channel_name: String,
+        channel_url: String,
+        icon: Option<String>,
+        duration: Option<i64>,
+        db: tauri::State<'_, Database>,
+    ) -> Result<(), String> {
+        db.add_history(&channel_name, &channel_url, icon.as_deref(), duration)
+            .await
+            .map_err(|e| e.to_string())
+    }
+
+    /// Get recent history
+    #[tauri::command]
+    async fn get_history(
+        limit: i64,
+        db: tauri::State<'_, Database>,
+    ) -> Result<Vec<(String, String, Option<String>, i64)>, String> {
+        db.get_history(limit).await.map_err(|e| e.to_string())
+    }
+
+    /// Fetch an XMLTV EPG URL, parse it and store it for a list
+    #[tauri::command]
+    async fn refresh_epg(
+        list_url: String,
+        epg_url: String,
+        db: tauri::State<'_, Database>,
+    ) -> Result<String, String> {
+        let list_manager = ListManager::new(db.pool().clone());
+        let _ = list_manager.set_epg_url(&list_url, &epg_url).await;
+
+        let response = reqwest::get(&epg_url).await.map_err(|e| e.to_string())?;
+        let content = response.text().await.map_err(|e| e.to_string())?;
+
+        let epg = EpgManager::new(db.pool().clone());
+        let (channels, programmes) = epg
+            .parse_and_store(&content, &epg_url)
+            .await
+            .map_err(|e| e.to_string())?;
+
+        Ok(format!(
+            "Stored {} channels and {} programmes from EPG",
+            channels, programmes
+        ))
     }
 
     /// Get the current EPG programme for a channel

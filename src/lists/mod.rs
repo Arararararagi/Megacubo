@@ -145,6 +145,27 @@ impl ListManager {
         info!("Deleted list: {}", url);
         Ok(())
     }
+
+    /// Associate an EPG XMLTV URL with a list
+    pub async fn set_epg_url(&self, url: &str, epg_url: &str) -> anyhow::Result<()> {
+        sqlx::query("UPDATE lists SET epg_url = ? WHERE url = ?")
+            .bind(epg_url)
+            .bind(url)
+            .execute(&self.pool)
+            .await?;
+
+        Ok(())
+    }
+
+    /// Get a single list by URL
+    pub async fn get_by_url(&self, url: &str) -> anyhow::Result<Option<List>> {
+        let list = sqlx::query_as::<_, List>("SELECT * FROM lists WHERE url = ?")
+            .bind(url)
+            .fetch_optional(&self.pool)
+            .await?;
+
+        Ok(list)
+    }
 }
 
 /// Discovery entry for community lists
