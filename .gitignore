@@ -104,6 +104,9 @@ google-services.json
 
 # Custom
 /dist/
+# Keep the Tauri frontend placeholder required at build time
+!/dist/
+!/dist/index.html
 www/.vscode
 premium.js
 www/nodejs/modules/premium/
@@ -120,3 +123,15 @@ www/nodejs/modules/MODULES-NPM-ANALYSIS.md
 www/nodejs/log.txt
 www/nodejs/modules/lists/index.has-multiexists-patch.js
 www/nodejs/modules/lists/loader - Copia.js
+
+
+# Added by cargo
+
+/target
+
+# Local Megacubo database / app data
+.megacubo/
+/Megacubo/
+
+# Tauri build-generated codegen output
+/gen

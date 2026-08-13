@@ -1,0 +1,91 @@
+[package]
+name = "megacubo-rs"
+version = "0.1.0"
+edition = "2021"
+description = "Rust rewrite of Megacubo IPTV player"
+license = "MIT"
+repository = "https://github.com/ArARARAGI/Megacubo"
+
+[lib]
+name = "megacubo"
+crate-type = ["lib", "cdylib"]
+
+[[bin]]
+name = "megacubo"
+path = "src-tauri/src/main.rs"
+
+[dependencies]
+# Async runtime
+tokio = { version = "1", features = ["full", "rt-multi-thread"] }
+
+# HTTP client
+reqwest = { version = "0.11", features = ["json", "stream", "gzip", "brotli", "deflate", "rustls-tls"] }
+
+# SQLite database
+sqlx = { version = "0.6", features = ["sqlite", "runtime-tokio-rustls", "migrate", "json", "offline"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# App data directory resolution
+dirs = "5"
+
+# Regex for M3U parsing
+regex = "1"
+
+# XML parsing for EPG (streaming SAX-like parser)
+quick-xml = "0.31"
+
+# Error handling
+anyhow = "1"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Date/time handling
+chrono = { version = "0.4", features = ["serde"] }
+
+# LRU cache
+lru = "0.12"
+
+# Memory arena for object pooling
+bumpalo = "3"
+
+# For finding external players - pin to avoid ICU issues
+which = { version = "4", default-features = false }
+
+# Optional: Tauri for desktop UI (Phase 1)
+tauri = { version = "2", optional = true }
+
+# Optional: libmpv for playback (Phase 3). Requires the system libmpv C library.
+libmpv = { version = "2", optional = true }
+
+# Optional: napi for Node.js module (Phase 5)
+napi = { version = "2", optional = true }
+napi-derive = { version = "2", optional = true }
+
+# NOTE: `url`/`idna` are intentionally NOT pinned. The original scaffold pinned
+# them to `url = "=2.4"` to avoid pulling in the `icu_*` crates (used by
+# `idna 0.5`), but modern Tauri requires `url ^2.5`. The `icu_*` crates are
+# pure-Rust and compile fine on desktop; revisit for the Android target
+# (Phase 3) if the cross-build rejects them.
+
+[features]
+default = []
+desktop = ["tauri"]
+media = ["libmpv"]
+node-module = ["napi", "napi-derive"]
+
+[build-dependencies]
+tauri-build = { version = "2" }
+
+[profile.release]
+lto = true
+codegen-units = 1
+opt-level = 3
+strip = true
+
+[profile.dev]
+opt-level = 0

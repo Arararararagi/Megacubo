@@ -1,0 +1,32 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Megacubo",
+  "version": "0.1.0",
+  "identifier": "tv.megacubo.app",
+  "build": {
+    "beforeDevCommand": "echo 'no frontend dev server configured yet'",
+    "devUrl": "http://localhost:5173",
+    "beforeBuildCommand": "echo 'no frontend build configured yet'",
+    "frontendDist": "dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Megacubo",
+        "width": 1200,
+        "height": 800,
+        "resizable": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/icon.png"
+    ]
+  }
+}
