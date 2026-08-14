@@ -242,7 +242,7 @@ mod app {
         list_url: String,
         db: tauri::State<'_, Database>,
     ) -> Result<Vec<Channel>, String> {
-        db.get_channels(&list_url, 100, 0)
+        db.get_channels(&list_url, 500, 0)
             .await
             .map_err(|e| e.to_string())
     }
