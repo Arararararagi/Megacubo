@@ -313,6 +313,15 @@ impl Database {
         Ok(rows)
     }
 
+    /// Delete all channels belonging to a list.
+    pub async fn delete_channels_by_list(&self, list_url: &str) -> anyhow::Result<u64> {
+        let res = sqlx::query("DELETE FROM channels WHERE list_url = ?")
+            .bind(list_url)
+            .execute(&self.pool)
+            .await?;
+        Ok(res.rows_affected())
+    }
+
     /// Add or update a bookmark for a channel
     pub async fn add_bookmark(&self, channel_name: &str, channel_url: &str, icon: Option<&str>) -> anyhow::Result<()> {
         let now = chrono::Utc::now().timestamp();

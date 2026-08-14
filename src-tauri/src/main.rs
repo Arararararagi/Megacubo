@@ -21,8 +21,27 @@ mod app {
                 let _ = tracing_subscriber::fmt::try_init();
                 let db_path = default_db_path()?;
                 let db = tauri::async_runtime::block_on(Database::new(db_path.clone()))?;
+
+                // Refresh EPG for any lists that already have a guide wired up,
+                // so the schedule is populated on launch without manual clicks.
+                let startup_db = db.clone();
+                tauri::async_runtime::spawn(async move {
+                    if let Ok(lists) = ListManager::new(startup_db.pool().clone())
+                        .get_all()
+                        .await
+                    {
+                        for l in lists {
+                            if let Some(epg) = l.epg_url {
+                                if !epg.is_empty() {
+                                    let _ = refresh_epg_for(&startup_db, &l.url, &epg).await;
+                                }
+                            }
+                        }
+                    }
+                });
+
                 app.manage(db);
-                
+
                 #[cfg(feature = "media")]
                 {
                     let streamer = Streamer::new(true, None);
@@ -30,7 +49,7 @@ mod app {
                         streamer: std::sync::Mutex::new(streamer),
                     });
                 }
-                
+
                 println!("Megacubo initialized with database at: {:?}", db_path);
                 Ok(())
             });
@@ -41,6 +60,7 @@ mod app {
                 add_m3u_list,
                 add_xtream_list,
                 get_lists,
+                remove_list,
                 get_channels,
                 search_channels,
                 add_bookmark,
@@ -68,6 +88,7 @@ mod app {
                 add_m3u_list,
                 add_xtream_list,
                 get_lists,
+                remove_list,
                 get_channels,
                 search_channels,
                 add_bookmark,
@@ -200,6 +221,21 @@ mod app {
             .map_err(|e| e.to_string())
     }
 
+    /// Remove a playlist and all of its stored channels.
+    #[tauri::command]
+    async fn remove_list(
+        list_url: String,
+        db: tauri::State<'_, Database>,
+    ) -> Result<String, String> {
+        let lists = ListManager::new(db.pool().clone());
+        let _ = db.delete_channels_by_list(&list_url).await;
+        lists
+            .delete(&list_url)
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(format!("Removed playlist {}", list_url))
+    }
+
     /// Get channels for a list (first page)
     #[tauri::command]
     async fn get_channels(
@@ -266,20 +302,21 @@ mod app {
 
     /// Fetch an XMLTV EPG URL, parse it and store it for a list
     #[tauri::command]
-    async fn refresh_epg(
-        list_url: String,
-        epg_url: String,
-        db: tauri::State<'_, Database>,
+    /// Fetch an XMLTV EPG and store it (channels + programmes).
+    async fn refresh_epg_for(
+        db: &Database,
+        list_url: &str,
+        epg_url: &str,
     ) -> Result<String, String> {
         let list_manager = ListManager::new(db.pool().clone());
-        let _ = list_manager.set_epg_url(&list_url, &epg_url).await;
+        let _ = list_manager.set_epg_url(list_url, epg_url).await;
 
-        let response = reqwest::get(&epg_url).await.map_err(|e| e.to_string())?;
+        let response = reqwest::get(epg_url).await.map_err(|e| e.to_string())?;
         let content = response.text().await.map_err(|e| e.to_string())?;
 
         let epg = EpgManager::new(db.pool().clone());
         let (channels, programmes) = epg
-            .parse_and_store(&content, &epg_url)
+            .parse_and_store(&content, epg_url)
             .await
             .map_err(|e| e.to_string())?;
 
@@ -287,6 +324,15 @@ mod app {
             "Stored {} channels and {} programmes from EPG",
             channels, programmes
         ))
+    }
+
+    #[tauri::command]
+    async fn refresh_epg(
+        list_url: String,
+        epg_url: String,
+        db: tauri::State<'_, Database>,
+    ) -> Result<String, String> {
+        refresh_epg_for(&db, &list_url, &epg_url).await
     }
 
     /// Get the upcoming EPG schedule (current + future programmes) for a channel

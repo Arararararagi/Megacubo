@@ -129,6 +129,7 @@
         <div class="toolbar">
           <select id="list-select"></select>
           <button class="ghost" id="refresh-epg">Load EPG</button>
+          <button class="ghost" id="remove-list">Remove</button>
         </div>
         <div class="grid" id="channels-grid"></div>
       </section>
@@ -527,6 +528,24 @@
           setStatus(msg);
         } catch (e) {
           setStatus("EPG refresh failed: " + e, true);
+        }
+      });
+
+      $("remove-list").addEventListener("click", async () => {
+        if (!currentList) {
+          setStatus("No playlist selected.", true);
+          return;
+        }
+        if (!confirm("Remove playlist “" + (currentList.name || currentList.url) + "” and all its channels?")) {
+          return;
+        }
+        try {
+          setStatus("Removing playlist…");
+          const msg = await invoke("remove_list", { listUrl: currentList.url });
+          setStatus(msg);
+          await loadLists();
+        } catch (e) {
+          setStatus("Failed to remove playlist: " + e, true);
         }
       });
 
