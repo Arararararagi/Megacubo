@@ -104,7 +104,11 @@
     <header>
       <h1><span class="logo">◉</span> Megacubo</h1>
       <form class="add-form" id="add-form">
-        <input id="list-url" type="url" placeholder="M3U playlist URL" required />
+        <select id="list-type" title="Playlist type">
+          <option value="m3u">M3U</option>
+          <option value="xtream">Xtream</option>
+        </select>
+        <input id="list-url" type="url" placeholder="Playlist URL" required />
         <input id="epg-url" type="url" placeholder="EPG URL (optional)" />
         <button type="submit">Add Playlist</button>
       </form>
@@ -528,15 +532,21 @@
 
       $("add-form").addEventListener("submit", async (e) => {
         e.preventDefault();
+        const type = $("list-type").value;
         const url = $("list-url").value.trim();
         const epg = $("epg-url").value.trim();
         if (!url) return;
         try {
           setStatus("Adding playlist…");
-          const msg = await invoke("add_m3u_list", {
-            url,
-            epgUrl: epg || null,
-          });
+          let msg;
+          if (type === "xtream") {
+            msg = await invoke("add_xtream_list", { url });
+          } else {
+            msg = await invoke("add_m3u_list", {
+              url,
+              epgUrl: epg || null,
+            });
+          }
           setStatus(msg);
           $("list-url").value = "";
           $("epg-url").value = "";
@@ -544,6 +554,12 @@
         } catch (e) {
           setStatus("Failed to add playlist: " + e, true);
         }
+      });
+
+      // EPG field only applies to M3U lists.
+      $("list-type").addEventListener("change", () => {
+        $("epg-url").style.display =
+          $("list-type").value === "xtream" ? "none" : "";
       });
 
       async function doSearch() {

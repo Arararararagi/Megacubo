@@ -12,6 +12,7 @@ mod app {
         ListManager, Streamer,
         db::Channel, epg::{EpgManager, EpgProgramme},
         lists::{List, ListType, ListStatus}, parser::M3uEntry,
+        xtream::{XtreamCredentials, XtreamChannel},
     };
 
     pub fn run() {
@@ -38,6 +39,7 @@ mod app {
         {
             builder = builder.invoke_handler(tauri::generate_handler![
                 add_m3u_list,
+                add_xtream_list,
                 get_lists,
                 get_channels,
                 search_channels,
@@ -64,6 +66,7 @@ mod app {
         {
             builder = builder.invoke_handler(tauri::generate_handler![
                 add_m3u_list,
+                add_xtream_list,
                 get_lists,
                 get_channels,
                 search_channels,
@@ -133,6 +136,59 @@ mod app {
         let _ = list_manager.update_status(&url, status, err).await;
 
         Ok(format!("Parsed {} channels from {}", count, url))
+    }
+
+    /// Add an Xtream Codes playlist: authenticate, fetch live categories +
+    /// streams, and store them as channels. The EPG URL is auto-derived.
+    #[tauri::command]
+    async fn add_xtream_list(
+        url: String,
+        db: tauri::State<'_, Database>,
+    ) -> Result<String, String> {
+        let creds = XtreamCredentials::from_url(&url).map_err(|e| e.to_string())?;
+        let client = creds.client();
+        let auth = client.authenticate().await.map_err(|e| e.to_string())?;
+        let client = auth.client();
+
+        let list_manager = ListManager::new(db.pool().clone());
+        let _ = list_manager
+            .add_list(&List::new(auth.base_url.clone(), ListType::Xtream))
+            .await;
+
+        // Auto-wire the provider's XMLTV EPG so "Load EPG" works.
+        let epg_url = client.epg_url();
+        let _ = list_manager.set_epg_url(&auth.base_url, &epg_url).await;
+
+        let streams: Vec<XtreamChannel> = client
+            .get_live_streams()
+            .await
+            .map_err(|e| e.to_string())?;
+
+        let count = streams.len();
+        for s in &streams {
+            let entry = M3uEntry {
+                name: s.name.clone(),
+                url: s.url.clone(),
+                icon: s.icon.clone(),
+                group: s.group.clone(),
+                tvg_id: s.tvg_id.clone(),
+                tvg_name: None,
+                tvg_logo: s.icon.clone(),
+                tvg_country: None,
+                tvg_language: None,
+                catchup: None,
+                catchup_source: None,
+                catchup_days: None,
+                tvg_shift: None,
+            };
+            let _ = db.insert_channel(&entry, &auth.base_url).await;
+        }
+
+        let status = if count > 0 { ListStatus::Loaded } else { ListStatus::Error };
+        let err = if count == 0 { Some("no channels returned") } else { None };
+        let _ = list_manager.update_status(&auth.base_url, status, err).await;
+
+        Ok(format!("Loaded {} Xtream channels from {}", count, auth.base_url))
     }
 
     /// Get all configured lists

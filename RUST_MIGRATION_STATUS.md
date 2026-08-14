@@ -52,6 +52,7 @@ Rewrite the Electron/JS-based Megacubo IPTV player in Rust, using **Tauri v2** a
 - `parser::tests::test_parse_extgrp_and_rtmp` — `#EXTGRP` group + non-`http` URL.
 - `streamer::tests::test_from_content` — stream-type detection from bytes (TS / HLS / DASH / unknown).
 - `streamer::tests::test_probe_stream` — URL-based probe (`.m3u8`/`.mpd`/`.ts`/rtmp/http).
+- `xtream::tests::test_from_url_path` / `test_from_url_c_prefix` / `test_from_url_query` / `test_from_url_invalid` — Xtream URL parsing (path, `/c/` prefix, query, invalid).
 
 ### 3.4 EPG, storage & parser hardening (Sprint A progress)
 - **EPG XMLTV parser**: added `epg::parse_xmltv` — a streaming `quick-xml` reader producing `XmltvChannel`/`XmltvProgramme`. `EpgManager::parse_and_store` bulk-inserts channels + programmes in a transaction (clears the previous `epg_url` first) and `get_schedule` returns the upcoming programme list for a channel.
@@ -60,6 +61,7 @@ Rewrite the Electron/JS-based Megacubo IPTV player in Rust, using **Tauri v2** a
 - **Streaming download**: `M3uParser::parse_stream` parses an `AsyncRead` incrementally (used by `add_m3u_list` via `tokio-util::StreamReader` over the reqwest byte stream) — avoids loading the whole playlist into memory.
 - **Tauri commands wired**: `add_m3u_list` (streaming + accepts an optional EPG URL + resolves relative URLs), `get_lists`, `get_channels`, `search_channels`, `add_bookmark`/`get_bookmarks`, `add_history`/`get_history`, `refresh_epg`, `get_epg_schedule`, `launch_external_player`. `ListManager` gained `set_epg_url`/`get_by_url`.
 - **In-app playback (libmpv)**: behind the `media` feature. `streamer::MpvPlayer` wraps `libmpv::Mpv` (a managed `PlayerState` in the Tauri app). Tauri commands `init_player`, `play_in_app`, `pause_in_app`, `resume_in_app`, `stop_in_app`, `set_volume`, `get_time`, `get_duration`, `seek` drive playback. Requires the system `libmpv` library at link time (see `.cargo/config.toml` for the macOS Homebrew path).
+- **Xtream Codes support**: `xtream::XtreamClient` parses provider URLs (path `/user/pass`, `/c/user/pass`, `player_api.php?username=…&password=…`), authenticates, and fetches live categories + streams. `add_xtream_list` Tauri command stores channels (`{base}/live/{user}/{pass}/{id}.m3u8`) into the channels, auto-wires the provider's XMLTV EPG (`/xmltv.php`). UI has an M3U/Xtream type selector.
 
 ### 3.5 Functional UI (`dist/index.html`)
 - Replaced the placeholder with a self-contained vanilla-JS app (no build step) driven by `window.__TAURI__.core.invoke` (global Tauri enabled via `app.withGlobalTauri`).
@@ -73,7 +75,7 @@ Rewrite the Electron/JS-based Megacubo IPTV player in Rust, using **Tauri v2** a
 | `cargo check` | ✅ passes |
 | `cargo build --features desktop` | ✅ compiles the GUI binary (embeds `dist/` UI) |
 | `cargo build --features desktop,media` | ✅ compiles with libmpv in-app playback (needs system `libmpv`; see `.cargo/config.toml`) |
-| `cargo test --lib` | ✅ 12 tests pass |
+| `cargo test --lib` | ✅ 16 tests pass |
 | `cargo run --features desktop` | launches the native window (functional UI) |
 
 The `desktop` binary embeds the `dist/` frontend at build time. GUI runtime requires a desktop session (cannot be exercised in a headless CI here), but the build, JS syntax, and all backend commands are verified by tests.
@@ -84,6 +86,7 @@ The `desktop` binary embeds the `dist/` frontend at build time. GUI runtime requ
 - **No Xtream / MAG** support (only M3U type in `ListManager`).
 - **Discovery** has local CRUD only — no cloud fetch / health scoring.
 - **Playback**: external-player launch is fully wired. **In-app playback (libmpv)** is implemented behind the `media` feature and requires the system `libmpv` library at link time (`.cargo/config.toml` sets the macOS Homebrew path). When built without `media`, the UI gracefully hides the in-app buttons.
+- **Xtream**: live TV categories/streams are supported (incl. auto EPG), but **VOD and Series** are not yet fetched/stored.
 - **Android**: explicitly out of scope (desktop-only app).
 - **UI**: functional but minimal (vanilla JS, no framework, no video embedding inside the webview — libmpv opens its own native window; no settings, no catchup-playback UI). Intended as a usable baseline, not final design.
 
