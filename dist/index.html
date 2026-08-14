@@ -87,6 +87,17 @@
       .epg-item .t { color: var(--muted); font-size: 12px; }
       .epg-item .ti { font-weight: 600; }
       .epg-item .de { color: var(--muted); font-size: 12px; }
+      #player-bar {
+        position: fixed; bottom: 0; left: 0; right: 0;
+        background: var(--panel); border-top: 1px solid #00000060;
+        padding: 10px 18px; display: none; align-items: center; gap: 10px;
+        z-index: 100;
+      }
+      #player-bar.active { display: flex; }
+      #player-bar .pn { font-weight: 600; min-width: 140px; }
+      #player-bar .ctrl { display: flex; gap: 6px; }
+      #player-bar input[type="range"] { flex: 1; }
+      #player-bar .tm { color: var(--muted); font-size: 12px; min-width: 90px; text-align: right; }
     </style>
   </head>
   <body>
@@ -142,6 +153,18 @@
       </section>
     </main>
 
+    <div id="player-bar">
+      <div class="pn" id="player-name">—</div>
+      <div class="ctrl">
+        <button id="pb-play">Play</button>
+        <button id="pb-pause" class="ghost">Pause</button>
+        <button id="pb-stop" class="ghost">Stop</button>
+      </div>
+      <input id="pb-seek" type="range" min="0" max="100" value="0" />
+      <div class="tm" id="pb-time">0:00 / 0:00</div>
+      <input id="pb-volume" type="range" min="0" max="100" value="100" style="max-width:90px" />
+    </div>
+
     <script>
       const TAURI = window.__TAURI__;
       const invoke = (cmd, args = {}) => TAURI.core.invoke(cmd, args);
@@ -151,6 +174,21 @@
       let lists = [];
       let currentList = null;
       let selectedChannel = null;
+      let inAppAvailable = false;
+      let currentPlaying = null;
+      let timeTimer = null;
+      let currentDuration = 0;
+      let currentTime = 0;
+
+      // Detect in-app playback support (requires `media` feature build)
+      (async () => {
+        try {
+          await invoke("init_player");
+          inAppAvailable = true;
+        } catch (e) {
+          inAppAvailable = false;
+        }
+      })();
 
       function setStatus(msg, isError = false) {
         statusEl.textContent = msg || "";
@@ -211,8 +249,16 @@
 
         const play = document.createElement("button");
         play.textContent = "Play";
-        play.onclick = () => playChannel(ch);
+        play.onclick = () => playChannel(ch, false);
         actions.appendChild(play);
+
+        if (inAppAvailable) {
+          const playApp = document.createElement("button");
+          playApp.className = "ghost";
+          playApp.textContent = "▶ App";
+          playApp.onclick = () => playChannel(ch, true);
+          actions.appendChild(playApp);
+        }
 
         const bm = document.createElement("button");
         bm.className = "ghost";
@@ -251,28 +297,120 @@
 
         const play = document.createElement("button");
         play.textContent = "Play";
-        play.onclick = () => playChannel(ch);
+        play.onclick = () => playChannel(ch, false);
         row.appendChild(play);
+
+        if (inAppAvailable) {
+          const playApp = document.createElement("button");
+          playApp.className = "ghost";
+          playApp.textContent = "▶ App";
+          playApp.onclick = () => playChannel(ch, true);
+          row.appendChild(playApp);
+        }
+
         return row;
       }
 
-      async function playChannel(ch) {
+      async function playChannel(ch, inApp) {
         const url = ch.url || ch.channel_url;
         const name = ch.name || ch.channel_name;
         const icon = iconFor(ch) || ch.icon;
+
         try {
-          await invoke("launch_external_player", { url });
-          await invoke("add_history", {
-            channelName: name,
-            channelUrl: url,
-            icon: icon || null,
-            duration: null,
-          });
+          if (inApp && inAppAvailable) {
+            closePlayerBar();
+            await invoke("play_in_app", { url });
+            currentPlaying = { name, url };
+            openPlayerBar(name);
+            await invoke("add_history", {
+              channelName: name,
+              channelUrl: url,
+              icon: icon || null,
+              duration: null,
+            });
+          } else {
+            await invoke("launch_external_player", { url });
+            await invoke("add_history", {
+              channelName: name,
+              channelUrl: url,
+              icon: icon || null,
+              duration: null,
+            });
+          }
           if (currentTab() === "history") loadHistory();
         } catch (e) {
           setStatus("Failed to play: " + e, true);
         }
       }
+
+      function openPlayerBar(name) {
+        $("player-name").textContent = name;
+        $("player-bar").classList.add("active");
+        startTimer();
+      }
+
+      function closePlayerBar() {
+        $("player-bar").classList.remove("active");
+        currentPlaying = null;
+        stopTimer();
+      }
+
+      function startTimer() {
+        stopTimer();
+        timeTimer = setInterval(updateTime, 1000);
+      }
+      function stopTimer() {
+        if (timeTimer) { clearInterval(timeTimer); timeTimer = null; }
+      }
+
+      async function updateTime() {
+        try {
+          const [pos, dur] = await Promise.all([
+            invoke("get_time"),
+            invoke("get_duration"),
+          ]);
+          if (pos == null || dur == null || dur <= 0) return;
+          currentTime = pos;
+          currentDuration = dur;
+          $("pb-time").textContent = fmtDur(pos) + " / " + fmtDur(dur);
+          $("pb-seek").value = Math.min(100, Math.round((pos / dur) * 100));
+        } catch (e) { /* ignore */ }
+      }
+
+      function fmtDur(sec) {
+        if (sec == null) return "0:00";
+        const m = Math.floor(sec / 60);
+        const s = Math.floor(sec % 60);
+        return m + ":" + String(s).padStart(2, "0");
+      }
+
+      async function pausePlayback() {
+        try { await invoke("pause_in_app"); } catch (e) { setStatus("Pause failed: " + e, true); }
+      }
+      async function resumePlayback() {
+        try { await invoke("resume_in_app"); } catch (e) { setStatus("Resume failed: " + e, true); }
+      }
+      async function stopPlayback() {
+        try {
+          await invoke("stop_in_app");
+          closePlayerBar();
+        } catch (e) { setStatus("Stop failed: " + e, true); }
+      }
+      async function seekPlayback(val) {
+        try { await invoke("seek", { pos: val }); } catch (e) { /* ignore */ }
+      }
+      async function setVol(v) {
+        try { await invoke("set_volume", { volume: v }); } catch (e) { /* ignore */ }
+      }
+
+      $("pb-play").onclick = resumePlayback;
+      $("pb-pause").onclick = pausePlayback;
+      $("pb-stop").onclick = stopPlayback;
+      $("pb-seek").oninput = (e) => {
+        const pct = parseFloat(e.target.value);
+        if (currentDuration > 0) seekPlayback((pct / 100) * currentDuration);
+      };
+      $("pb-volume").oninput = (e) => setVol(parseFloat(e.target.value));
 
       async function bookmarkChannel(ch) {
         try {

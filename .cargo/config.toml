@@ -1,0 +1,18 @@
+# Cargo configuration for Megacubo
+# 
+# The `media` feature (libmpv for in-app playback) requires the system libmpv
+# library to be installed. On macOS with Homebrew, `brew install mpv` provides
+# it; the library path is added below so the linker can find it.
+#
+# For other platforms, adjust the library search path accordingly, e.g.:
+#   Linux:   /usr/lib or /usr/local/lib
+#   Windows: the mpv.dll import library path
+[target.aarch64-apple-darwin]
+rustflags = ["-L", "/opt/homebrew/opt/mpv/lib"]
+
+[target.x86_64-apple-darwin]
+rustflags = ["-L", "/usr/local/opt/mpv/lib"]
+
+# Windows: link against the mpv import library
+# [target.x86_64-pc-windows-msvc]
+# rustflags = ["-L", "C:/path/to/mpv/lib"]

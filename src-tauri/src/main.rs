@@ -15,16 +15,28 @@ mod app {
     };
 
     pub fn run() {
-        tauri::Builder::default()
+        let mut builder = tauri::Builder::default()
             .setup(|app| {
                 let _ = tracing_subscriber::fmt::try_init();
                 let db_path = default_db_path()?;
                 let db = tauri::async_runtime::block_on(Database::new(db_path.clone()))?;
                 app.manage(db);
+                
+                #[cfg(feature = "media")]
+                {
+                    let streamer = Streamer::new(true, None);
+                    app.manage(playback::PlayerState {
+                        streamer: std::sync::Mutex::new(streamer),
+                    });
+                }
+                
                 println!("Megacubo initialized with database at: {:?}", db_path);
                 Ok(())
-            })
-            .invoke_handler(tauri::generate_handler![
+            });
+
+        #[cfg(feature = "media")]
+        {
+            builder = builder.invoke_handler(tauri::generate_handler![
                 add_m3u_list,
                 get_lists,
                 get_channels,
@@ -36,7 +48,36 @@ mod app {
                 refresh_epg,
                 get_epg_schedule,
                 launch_external_player,
-            ])
+                playback::init_player,
+                playback::play_in_app,
+                playback::pause_in_app,
+                playback::resume_in_app,
+                playback::stop_in_app,
+                playback::set_volume,
+                playback::get_time,
+                playback::get_duration,
+                playback::seek,
+            ]);
+        }
+
+        #[cfg(not(feature = "media"))]
+        {
+            builder = builder.invoke_handler(tauri::generate_handler![
+                add_m3u_list,
+                get_lists,
+                get_channels,
+                search_channels,
+                add_bookmark,
+                get_bookmarks,
+                add_history,
+                get_history,
+                refresh_epg,
+                get_epg_schedule,
+                launch_external_player,
+            ]);
+        }
+
+        builder
             .run(tauri::generate_context!())
             .expect("error while running tauri application");
     }
@@ -211,6 +252,99 @@ mod app {
         Streamer::new(false, None)
             .launch_external_player(&url)
             .map_err(|e| e.to_string())
+    }
+
+    /// In-app playback commands (require `media` feature)
+    #[cfg(feature = "media")]
+    mod playback {
+        use super::*;
+        use std::sync::Mutex;
+        use tauri::State;
+
+        /// Managed MPV player state
+        pub struct PlayerState {
+            pub streamer: Mutex<Streamer>,
+        }
+
+        /// Initialize the in-app player
+        #[tauri::command]
+        pub async fn init_player(state: State<'_, PlayerState>) -> Result<(), String> {
+            let mut streamer = state.streamer.lock().map_err(|e| e.to_string())?;
+            *streamer = Streamer::new(true, None);
+            Ok(())
+        }
+
+        /// Play a stream in-app
+        #[tauri::command]
+        pub async fn play_in_app(url: String, state: State<'_, PlayerState>) -> Result<(), String> {
+            let streamer = state.streamer.lock().map_err(|e| e.to_string())?;
+            streamer.play_in_app(&url).map_err(|e| e.to_string())
+        }
+
+        /// Pause in-app playback
+        #[tauri::command]
+        pub async fn pause_in_app(state: State<'_, PlayerState>) -> Result<(), String> {
+            let streamer = state.streamer.lock().map_err(|e| e.to_string())?;
+            streamer.pause_in_app().map_err(|e| e.to_string())
+        }
+
+        /// Resume in-app playback
+        #[tauri::command]
+        pub async fn resume_in_app(state: State<'_, PlayerState>) -> Result<(), String> {
+            let streamer = state.streamer.lock().map_err(|e| e.to_string())?;
+            streamer.resume_in_app().map_err(|e| e.to_string())
+        }
+
+        /// Stop in-app playback
+        #[tauri::command]
+        pub async fn stop_in_app(state: State<'_, PlayerState>) -> Result<(), String> {
+            let streamer = state.streamer.lock().map_err(|e| e.to_string())?;
+            streamer.stop_in_app().map_err(|e| e.to_string())
+        }
+
+        /// Set volume (0.0 - 100.0)
+        #[tauri::command]
+        pub async fn set_volume(volume: f64, state: State<'_, PlayerState>) -> Result<(), String> {
+            let streamer = state.streamer.lock().map_err(|e| e.to_string())?;
+            if let Some(ref mpv) = streamer.mpv {
+                mpv.set_volume(volume).map_err(|e| e.to_string())
+            } else {
+                Err("In-app playback not available".to_string())
+            }
+        }
+
+        /// Get current playback time
+        #[tauri::command]
+        pub async fn get_time(state: State<'_, PlayerState>) -> Result<Option<f64>, String> {
+            let streamer = state.streamer.lock().map_err(|e| e.to_string())?;
+            if let Some(ref mpv) = streamer.mpv {
+                mpv.get_time_pos().map_err(|e| e.to_string())
+            } else {
+                Ok(None)
+            }
+        }
+
+        /// Get total duration
+        #[tauri::command]
+        pub async fn get_duration(state: State<'_, PlayerState>) -> Result<Option<f64>, String> {
+            let streamer = state.streamer.lock().map_err(|e| e.to_string())?;
+            if let Some(ref mpv) = streamer.mpv {
+                mpv.get_duration().map_err(|e| e.to_string())
+            } else {
+                Ok(None)
+            }
+        }
+
+        /// Seek to position (seconds)
+        #[tauri::command]
+        pub async fn seek(pos: f64, state: State<'_, PlayerState>) -> Result<(), String> {
+            let streamer = state.streamer.lock().map_err(|e| e.to_string())?;
+            if let Some(ref mpv) = streamer.mpv {
+                mpv.set_time_pos(pos).map_err(|e| e.to_string())
+            } else {
+                Err("In-app playback not available".to_string())
+            }
+        }
     }
 }
 

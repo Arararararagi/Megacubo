@@ -50,6 +50,8 @@ Rewrite the Electron/JS-based Megacubo IPTV player in Rust, using **Tauri v2** a
 - `epg::tests::test_parse_xmltv` — XMLTV parse (channels + programmes, times, categories).
 - `epg::tests::test_parse_and_store` — XMLTV parse → SQLite store → query round-trip.
 - `parser::tests::test_parse_extgrp_and_rtmp` — `#EXTGRP` group + non-`http` URL.
+- `streamer::tests::test_from_content` — stream-type detection from bytes (TS / HLS / DASH / unknown).
+- `streamer::tests::test_probe_stream` — URL-based probe (`.m3u8`/`.mpd`/`.ts`/rtmp/http).
 
 ### 3.4 EPG, storage & parser hardening (Sprint A progress)
 - **EPG XMLTV parser**: added `epg::parse_xmltv` — a streaming `quick-xml` reader producing `XmltvChannel`/`XmltvProgramme`. `EpgManager::parse_and_store` bulk-inserts channels + programmes in a transaction (clears the previous `epg_url` first) and `get_schedule` returns the upcoming programme list for a channel.
@@ -57,10 +59,11 @@ Rewrite the Electron/JS-based Megacubo IPTV player in Rust, using **Tauri v2** a
 - **Bookmarks / History / Search storage**: `Database` gained `add_bookmark`/`get_bookmarks`, `add_history`/`get_history`, and `search_channels` (LIKE on name/group). The channels schema also stores `catchup*`, `tvg_shift`, and the `tvg_*` metadata; a `migrate()` step adds missing columns on older DBs.
 - **Streaming download**: `M3uParser::parse_stream` parses an `AsyncRead` incrementally (used by `add_m3u_list` via `tokio-util::StreamReader` over the reqwest byte stream) — avoids loading the whole playlist into memory.
 - **Tauri commands wired**: `add_m3u_list` (streaming + accepts an optional EPG URL + resolves relative URLs), `get_lists`, `get_channels`, `search_channels`, `add_bookmark`/`get_bookmarks`, `add_history`/`get_history`, `refresh_epg`, `get_epg_schedule`, `launch_external_player`. `ListManager` gained `set_epg_url`/`get_by_url`.
+- **In-app playback (libmpv)**: behind the `media` feature. `streamer::MpvPlayer` wraps `libmpv::Mpv` (a managed `PlayerState` in the Tauri app). Tauri commands `init_player`, `play_in_app`, `pause_in_app`, `resume_in_app`, `stop_in_app`, `set_volume`, `get_time`, `get_duration`, `seek` drive playback. Requires the system `libmpv` library at link time (see `.cargo/config.toml` for the macOS Homebrew path).
 
 ### 3.5 Functional UI (`dist/index.html`)
 - Replaced the placeholder with a self-contained vanilla-JS app (no build step) driven by `window.__TAURI__.core.invoke` (global Tauri enabled via `app.withGlobalTauri`).
-- Features: **add playlist** (M3U URL + optional EPG URL), **channel grid** per list with **Play / Bookmark / EPG** actions, **search**, **bookmarks** and **history** lists, and an **EPG schedule** view (current + upcoming programmes). Playback records history; bookmarking records bookmarks. Channels persist in SQLite so they survive restarts (reloaded on launch).
+- Features: **add playlist** (M3U URL + optional EPG URL), **channel grid** per list with **Play / ▶ App / Bookmark / EPG** actions, **search**, **bookmarks** and **history** lists, and an **EPG schedule** view (current + upcoming programmes). The **▶ App** button (shown only when the binary was built with the `media` feature) plays in-app via libmpv and shows a player bar (play/pause/stop, seek, volume). External **Play** launches the OS default / VLC. Playback records history; bookmarking records bookmarks. Channels persist in SQLite so they survive restarts (reloaded on launch).
 - `tauri.conf.json` embeds `dist/` at build time; `frontendDist` = `dist`, `withGlobalTauri` = `true`.
 
 ## 4. Build & Run Status
@@ -69,7 +72,8 @@ Rewrite the Electron/JS-based Megacubo IPTV player in Rust, using **Tauri v2** a
 | `cargo build` (default) | ✅ compiles; fallback bin prints a hint |
 | `cargo check` | ✅ passes |
 | `cargo build --features desktop` | ✅ compiles the GUI binary (embeds `dist/` UI) |
-| `cargo test --lib` | ✅ 10 tests pass |
+| `cargo build --features desktop,media` | ✅ compiles with libmpv in-app playback (needs system `libmpv`; see `.cargo/config.toml`) |
+| `cargo test --lib` | ✅ 12 tests pass |
 | `cargo run --features desktop` | launches the native window (functional UI) |
 
 The `desktop` binary embeds the `dist/` frontend at build time. GUI runtime requires a desktop session (cannot be exercised in a headless CI here), but the build, JS syntax, and all backend commands are verified by tests.
@@ -79,10 +83,9 @@ The `desktop` binary embeds the `dist/` frontend at build time. GUI runtime requ
 - **M3U parser**: `catchup`/`tvg-shift`, `#EXTGRP`, HLS `#EXT-X-STREAM-INF`, BOM, and relative URLs are handled. Still missing: selecting the best HLS variant automatically, UTF-8 encoding detection beyond BOM, and entries lacking any `#EXTINF`.
 - **No Xtream / MAG** support (only M3U type in `ListManager`).
 - **Discovery** has local CRUD only — no cloud fetch / health scoring.
-- **Playback**: only external-player launch (URL probing + open). **No in-app playback** and **no libmpv** integration (`media` feature unbuilt) — the UI opens the stream in the OS default / VLC.
+- **Playback**: external-player launch is fully wired. **In-app playback (libmpv)** is implemented behind the `media` feature and requires the system `libmpv` library at link time (`.cargo/config.toml` sets the macOS Homebrew path). When built without `media`, the UI gracefully hides the in-app buttons.
 - **Android**: explicitly out of scope (desktop-only app).
-- **UI**: functional but minimal (vanilla JS, no framework, no video embedding, no settings, no catchup-playback UI). Intended as a usable baseline, not final design.
-- `libmpv` is gated behind `media` and would require the system `libmpv` C library to compile.
+- **UI**: functional but minimal (vanilla JS, no framework, no video embedding inside the webview — libmpv opens its own native window; no settings, no catchup-playback UI). Intended as a usable baseline, not final design.
 
 ## 6. Next Steps (prioritized)
 
