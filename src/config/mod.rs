@@ -81,8 +81,11 @@ impl Config {
 
     /// Get the configuration file path
     pub fn config_path() -> anyhow::Result<PathBuf> {
-        // Use a simple default path
-        Ok(PathBuf::from(".megacubo").join("config.json"))
+        // Store config in the OS application-data directory so it works when the
+        // app is launched from a read-only bundle (e.g. the packaged .app).
+        let mut dir = dirs::data_dir().unwrap_or_else(|| PathBuf::from(".megacubo"));
+        dir.push("Megacubo");
+        Ok(dir.join("config.json"))
     }
 
     /// Return a safe, token-free view of the user settings.

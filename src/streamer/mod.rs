@@ -1,4 +1,5 @@
 use std::process::Command;
+use std::path::PathBuf;
 #[cfg(feature = "media")]
 use std::sync::Arc;
 use tracing::{info, warn, error};
@@ -43,6 +44,16 @@ impl MpvPlayer {
         ctx.set_property("vo", "gpu").map_err(|e| anyhow::anyhow!("{}", e))?;
         ctx.set_property("hwdec", "auto").map_err(|e| anyhow::anyhow!("{}", e))?;
         ctx.set_property("keep-open", "yes").map_err(|e| anyhow::anyhow!("{}", e))?;
+
+        // Keep mpv's state files (watch-later, screenshots) out of the current
+        // working directory, which is read-only inside a packaged .app.
+        let mut state_dir = dirs::data_dir().unwrap_or_else(|| PathBuf::from(".megacubo"));
+        state_dir.push("Megacubo");
+        let _ = std::fs::create_dir_all(&state_dir);
+        let state_dir = state_dir.to_string_lossy().into_owned();
+        let _ = ctx.set_property("watch-later-directory", state_dir.as_str());
+        let _ = ctx.set_property("screenshot-directory", state_dir.as_str());
+
         Ok(Self { ctx: Arc::new(ctx) })
     }
 
