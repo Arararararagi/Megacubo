@@ -82,6 +82,8 @@ mod app {
                 plex_seasons,
                 plex_episodes,
                 plex_item_url,
+                plex_set_watched,
+                plex_refresh,
                 playback::init_player,
                 playback::play_in_app,
                 playback::pause_in_app,
@@ -119,6 +121,8 @@ mod app {
                 plex_seasons,
                 plex_episodes,
                 plex_item_url,
+                plex_set_watched,
+                plex_refresh,
             ]);
         }
 
@@ -380,6 +384,28 @@ mod app {
         let p = cfg.plex.ok_or_else(|| "Plex not configured".to_string())?;
         PlexClient::new(p.server_url, p.auth_token, p.client_id)
             .playable(&rating_key)
+            .await
+            .map_err(|e| e.to_string())
+    }
+
+    /// Mark a Plex item (movie/episode/season/show) watched or unwatched.
+    #[tauri::command]
+    async fn plex_set_watched(rating_key: String, watched: bool) -> Result<(), String> {
+        let cfg = Config::load().await.map_err(|e| e.to_string())?;
+        let p = cfg.plex.ok_or_else(|| "Plex not configured".to_string())?;
+        PlexClient::new(p.server_url, p.auth_token, p.client_id)
+            .set_watched(&rating_key, watched)
+            .await
+            .map_err(|e| e.to_string())
+    }
+
+    /// Refresh a Plex item's metadata from its agent.
+    #[tauri::command]
+    async fn plex_refresh(rating_key: String) -> Result<(), String> {
+        let cfg = Config::load().await.map_err(|e| e.to_string())?;
+        let p = cfg.plex.ok_or_else(|| "Plex not configured".to_string())?;
+        PlexClient::new(p.server_url, p.auth_token, p.client_id)
+            .refresh(&rating_key)
             .await
             .map_err(|e| e.to_string())
     }

@@ -83,11 +83,44 @@ impl PlexClient {
     }
 
     fn req(&self, path: &str) -> reqwest::RequestBuilder {
-        let mut b = self.http.get(format!("{}{}", self.base_url, path));
+        self.request(reqwest::Method::GET, path)
+    }
+
+    fn request(&self, method: reqwest::Method, path: &str) -> reqwest::RequestBuilder {
+        let mut b = self.http.request(method, format!("{}{}", self.base_url, path));
         for (k, v) in self.auth_headers() {
             b = b.header(k, v);
         }
         b.header("X-Plex-Token", &self.token)
+    }
+
+    /// Mark an item (movie, episode, season or show) watched/unwatched.
+    pub async fn set_watched(&self, rating_key: &str, watched: bool) -> Result<()> {
+        let resp = self
+            .request(reqwest::Method::PUT, &scrobble_path(rating_key, watched))
+            .send()
+            .await
+            .map_err(|e| anyhow!("Plex scrobble request failed: {}", e))?;
+        if !resp.status().is_success() {
+            return Err(anyhow!("Plex scrobble failed: HTTP {}", resp.status()));
+        }
+        Ok(())
+    }
+
+    /// Refresh an item's metadata from its agent.
+    pub async fn refresh(&self, rating_key: &str) -> Result<()> {
+        let resp = self
+            .request(
+                reqwest::Method::GET,
+                &format!("/library/metadata/{}/refresh?force=1", rating_key),
+            )
+            .send()
+            .await
+            .map_err(|e| anyhow!("Plex refresh request failed: {}", e))?;
+        if !resp.status().is_success() {
+            return Err(anyhow!("Plex refresh failed: HTTP {}", resp.status()));
+        }
+        Ok(())
     }
 
     /// List libraries/sections on the server.
@@ -231,6 +264,15 @@ pub fn generate_client_id() -> String {
     let pid = std::process::id() as u128;
     let raw = format!("{:x}{:x}", nanos, pid);
     format!("megacubo-{}", raw)
+}
+
+/// Build the scrobble/unscrobble path for an item.
+fn scrobble_path(rating_key: &str, watched: bool) -> String {
+    format!(
+        "/:/{}?key={}&identifier=com.plexapp.plugins.library",
+        if watched { "scrobble" } else { "unscrobble" },
+        rating_key
+    )
 }
 
 /// Start a Plex login PIN. Returns the pin id, the short code and the
@@ -485,6 +527,18 @@ mod tests {
     fn test_client_id_format() {
         let id = generate_client_id();
         assert!(id.starts_with("megacubo-"));
+    }
+
+    #[test]
+    fn test_scrobble_path() {
+        assert_eq!(
+            scrobble_path("123", true),
+            "/:/scrobble?key=123&identifier=com.plexapp.plugins.library"
+        );
+        assert_eq!(
+            scrobble_path("123", false),
+            "/:/unscrobble?key=123&identifier=com.plexapp.plugins.library"
+        );
     }
 
     #[test]

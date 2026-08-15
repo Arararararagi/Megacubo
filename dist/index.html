@@ -861,6 +861,43 @@
           });
           actions.appendChild(open);
         }
+
+        const watched = document.createElement("button");
+        watched.className = "ghost";
+        watched.textContent = "✓ Watched";
+        watched.addEventListener("click", async () => {
+          try {
+            await invoke("plex_set_watched", { ratingKey: it.rating_key, watched: true });
+            setStatus("Marked “" + it.title + "” as watched");
+          } catch (e) {
+            setStatus("Failed: " + e, true);
+          }
+        });
+        const unwatched = document.createElement("button");
+        unwatched.className = "ghost";
+        unwatched.textContent = "↺ Unwatch";
+        unwatched.addEventListener("click", async () => {
+          try {
+            await invoke("plex_set_watched", { ratingKey: it.rating_key, watched: false });
+            setStatus("Marked “" + it.title + "” as unwatched");
+          } catch (e) {
+            setStatus("Failed: " + e, true);
+          }
+        });
+        const refresh = document.createElement("button");
+        refresh.className = "ghost";
+        refresh.textContent = "⟳ Refresh";
+        refresh.addEventListener("click", async () => {
+          try {
+            await invoke("plex_refresh", { ratingKey: it.rating_key });
+            setStatus("Refreshing metadata for “" + it.title + "”…");
+          } catch (e) {
+            setStatus("Failed: " + e, true);
+          }
+        });
+        actions.appendChild(watched);
+        actions.appendChild(unwatched);
+        actions.appendChild(refresh);
         card.appendChild(actions);
         return card;
       }
