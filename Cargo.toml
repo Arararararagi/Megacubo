@@ -64,7 +64,7 @@ bumpalo = "3"
 which = { version = "4", default-features = false }
 
 # Optional: Tauri for desktop UI (Phase 1)
-tauri = { version = "2", optional = true }
+tauri = { version = "2", optional = true , features = [] }
 
 # Optional: libmpv for playback (Phase 3). Requires the system libmpv C library.
 libmpv = { version = "2", optional = true }
@@ -80,13 +80,13 @@ napi-derive = { version = "2", optional = true }
 # (Phase 3) if the cross-build rejects them.
 
 [features]
-default = []
+default = ["desktop", "media"]
 desktop = ["tauri"]
 media = ["libmpv"]
 node-module = ["napi", "napi-derive"]
 
 [build-dependencies]
-tauri-build = { version = "2" }
+tauri-build = { version = "2", features = [] }
 
 [profile.release]
 lto = true

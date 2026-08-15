@@ -92,16 +92,19 @@ struct VodStream {
 struct SeriesItem {
     #[serde(default)]
     series_id: i64,
+    #[allow(dead_code)]
     #[serde(default)]
     name: String,
     #[serde(default)]
     cover: String,
+    #[allow(dead_code)]
     #[serde(default)]
     category_id: String,
 }
 
 #[derive(Debug, Deserialize)]
 struct SeriesInfo {
+    #[allow(dead_code)]
     #[serde(default)]
     name: Option<String>,
     #[serde(default)]
