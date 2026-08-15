@@ -6,7 +6,9 @@
 #[cfg(feature = "desktop")]
 mod app {
     use tauri::Manager;
+    use tauri::Emitter;
     use futures_util::TryStreamExt;
+    use serde::Serialize;
     use tracing::info;
     use megacubo::{
         Database, default_db_path, M3uParser,
@@ -28,26 +30,37 @@ mod app {
 
                 // Refresh EPG for any lists that already have a guide wired up,
                 // so the schedule is populated on launch without manual clicks
-                // (respecting the user's "auto-update EPG" setting).
+                // (respecting the user's "auto-update EPG" setting), and keep it
+                // fresh on a periodic interval thereafter.
+                let handle = app.handle().clone();
                 let startup_db = db.clone();
                 tauri::async_runtime::spawn(async move {
                     let auto = Config::load()
                         .await
                         .map(|c| c.auto_update_epg)
                         .unwrap_or(true);
-                    if !auto {
-                        return;
+                    if auto {
+                        refresh_all_epg(&startup_db, &handle).await;
                     }
-                    if let Ok(lists) = ListManager::new(startup_db.pool().clone())
-                        .get_all()
-                        .await
-                    {
-                        for l in lists {
-                            if let Some(epg) = l.epg_url {
-                                if !epg.is_empty() {
-                                    let _ = refresh_epg_for(&startup_db, &l.url, &epg).await;
-                                }
-                            }
+                });
+
+                // Periodic EPG refresh loop, driven by the configured interval.
+                let loop_db = db.clone();
+                let loop_handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    loop {
+                        let secs = Config::load()
+                            .await
+                            .map(|c| c.epg_update_interval_secs)
+                            .unwrap_or(1800)
+                            .max(60) as u64;
+                        tokio::time::sleep(tokio::time::Duration::from_secs(secs)).await;
+                        let auto = Config::load()
+                            .await
+                            .map(|c| c.auto_update_epg)
+                            .unwrap_or(true);
+                        if auto {
+                            refresh_all_epg(&loop_db, &loop_handle).await;
                         }
                     }
                 });
@@ -581,8 +594,63 @@ mod app {
         list_url: String,
         epg_url: String,
         db: tauri::State<'_, Database>,
+        app: tauri::AppHandle,
     ) -> Result<String, String> {
-        refresh_epg_for(&db, &list_url, &epg_url).await
+        emit_epg(&app, "list", &list_url, &format!("Refreshing {}…", list_url));
+        let res = refresh_epg_for(&db, &list_url, &epg_url).await;
+        match &res {
+            Ok(msg) => emit_epg(&app, "list-done", &list_url, msg),
+            Err(e) => emit_epg(&app, "error", &list_url, &format!("{}: {}", list_url, e)),
+        }
+        res
+    }
+
+    /// Progress payload emitted to the frontend during EPG refresh.
+    #[derive(Clone, Serialize)]
+    pub struct EpgProgress {
+        pub phase: String,
+        pub list_url: String,
+        pub message: String,
+    }
+
+    fn emit_epg(handle: &tauri::AppHandle, phase: &str, list_url: &str, message: &str) {
+        let _ = handle.emit(
+            "epg-progress",
+            EpgProgress {
+                phase: phase.to_string(),
+                list_url: list_url.to_string(),
+                message: message.to_string(),
+            },
+        );
+    }
+
+    /// Refresh the XMLTV guide for every list that has an `epg_url` wired,
+    /// emitting progress events as each list is processed.
+    async fn refresh_all_epg(db: &Database, handle: &tauri::AppHandle) {
+        emit_epg(handle, "start", "", "Starting EPG refresh…");
+        let lists = match ListManager::new(db.pool().clone()).get_all().await {
+            Ok(l) => l,
+            Err(e) => {
+                emit_epg(handle, "error", "", &format!("Failed to list playlists: {}", e));
+                return;
+            }
+        };
+        let mut done = 0;
+        for l in lists {
+            if let Some(epg) = &l.epg_url {
+                if !epg.is_empty() {
+                    emit_epg(handle, "list", &l.url, &format!("Refreshing {}…", l.url));
+                    match refresh_epg_for(db, &l.url, epg).await {
+                        Ok(msg) => {
+                            emit_epg(handle, "list-done", &l.url, &msg);
+                            done += 1;
+                        }
+                        Err(e) => emit_epg(handle, "error", &l.url, &format!("{}: {}", l.url, e)),
+                    }
+                }
+            }
+        }
+        emit_epg(handle, "done", "", &format!("EPG refresh complete ({} lists)", done));
     }
 
     /// Get the upcoming EPG schedule (current + future programmes) for a channel

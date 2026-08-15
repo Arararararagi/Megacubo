@@ -147,6 +147,7 @@
           <select id="list-select"></select>
           <button class="ghost" id="refresh-epg">Load EPG</button>
           <button class="ghost" id="remove-list">Remove</button>
+          <span id="epg-progress" class="meta"></span>
         </div>
         <div class="grid" id="channels-grid"></div>
       </section>
@@ -1125,6 +1126,19 @@
 
       // Boot
       (async () => {
+        // Surface EPG refresh progress (startup refresh, scheduled refresh,
+        // and manual "Load EPG") in the Channels toolbar.
+        try {
+          const { listen } = window.__TAURI__.event;
+          await listen("epg-progress", (e) => {
+            const el = document.getElementById("epg-progress");
+            if (el) {
+              el.textContent = e.payload.message;
+              el.style.color = e.payload.phase === "error" ? "var(--danger)" : "var(--muted)";
+            }
+          });
+        } catch (e) { /* events unavailable */ }
+
         try {
           const s = await invoke("get_settings");
           applyTheme(s.theme || "dark");
