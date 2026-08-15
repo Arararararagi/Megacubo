@@ -7,6 +7,7 @@
 mod app {
     use tauri::Manager;
     use futures_util::TryStreamExt;
+    use tracing::info;
     use megacubo::{
         Database, default_db_path, M3uParser,
         ListManager, Streamer,
