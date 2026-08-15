@@ -81,6 +81,7 @@ mod app {
                 get_history,
                 refresh_epg,
                 get_epg_schedule,
+                catchup_url,
                 launch_external_player,
                 plex_login_start,
                 plex_login_poll,
@@ -122,6 +123,7 @@ mod app {
                 get_history,
                 refresh_epg,
                 get_epg_schedule,
+                catchup_url,
                 launch_external_player,
                 plex_login_start,
                 plex_login_poll,
@@ -242,13 +244,13 @@ mod app {
                 icon: s.icon.clone(),
                 group: s.group.clone(),
                 tvg_id: s.tvg_id.clone(),
+                catchup: s.catchup_source.clone().map(|_| "default".to_string()),
+                catchup_source: s.catchup_source.clone(),
+                catchup_days: s.catchup_days.clone(),
                 tvg_name: None,
                 tvg_logo: s.icon.clone(),
                 tvg_country: None,
                 tvg_language: None,
-                catchup: None,
-                catchup_source: None,
-                catchup_days: None,
                 tvg_shift: None,
             };
             let _ = db.insert_channel(&entry, &auth.base_url).await;
@@ -283,6 +285,18 @@ mod app {
             .await
             .map_err(|e| e.to_string())?;
         Ok(format!("Removed playlist {}", list_url))
+    }
+
+    /// Build a catch-up (time-shifted) playback URL from a channel's
+    /// `catchup-source` template and the chosen window (Unix timestamps).
+    #[tauri::command]
+    fn catchup_url(
+        channel_url: String,
+        catchup_source: String,
+        start_utc: i64,
+        end_utc: Option<i64>,
+    ) -> String {
+        megacubo::parser::build_catchup_url(&channel_url, &catchup_source, start_utc, end_utc)
     }
 
     // ----- Plex -----

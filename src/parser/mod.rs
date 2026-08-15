@@ -376,3 +376,56 @@ http://example.com/hd/index.m3u8
         assert_eq!(entries[1].url, "rtmp://example.com/b");
     }
 }
+
+/// Build a catch-up (time-shifted) playback URL for a channel.
+///
+/// `catchup_source` is the provider-supplied suffix, e.g. `?utc={utc}&lutc={lutc}`
+/// (type `append`/`default`) or `?utc={utc}` (type `shift`). The `{utc}` and
+/// `{lutc}` tokens are replaced with Unix timestamps (seconds); the result is
+/// appended directly to `channel_url`. `end_utc` is used for `{lutc}` and falls
+/// back to `start_utc` when absent (single-timestamp shift).
+pub fn build_catchup_url(
+    channel_url: &str,
+    catchup_source: &str,
+    start_utc: i64,
+    end_utc: Option<i64>,
+) -> String {
+    if catchup_source.is_empty() {
+        return channel_url.to_string();
+    }
+    let end = end_utc.unwrap_or(start_utc);
+    let suffix = catchup_source
+        .replace("{utc}", &start_utc.to_string())
+        .replace("{lutc}", &end.to_string());
+    format!("{}{}", channel_url, suffix)
+}
+
+#[cfg(test)]
+mod catchup_tests {
+    use super::*;
+
+    #[test]
+    fn test_build_catchup_append() {
+        let url = build_catchup_url(
+            "http://h/live/1",
+            "?utc={utc}&lutc={lutc}",
+            1_700_000_000,
+            Some(1_700_003_600),
+        );
+        assert_eq!(url, "http://h/live/1?utc=1700000000&lutc=1700003600");
+    }
+
+    #[test]
+    fn test_build_catchup_shift_falls_back_to_start() {
+        let url = build_catchup_url("http://h/live/1", "?utc={utc}", 1_700_000_000, None);
+        assert_eq!(url, "http://h/live/1?utc=1700000000");
+    }
+
+    #[test]
+    fn test_build_catchup_empty_source() {
+        assert_eq!(
+            build_catchup_url("http://h/live/1", "", 1, None),
+            "http://h/live/1"
+        );
+    }
+}

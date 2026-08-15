@@ -18,6 +18,8 @@ pub struct XtreamChannel {
     pub icon: Option<String>,
     pub group: Option<String>,
     pub tvg_id: Option<String>,
+    pub catchup_source: Option<String>,
+    pub catchup_days: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -64,6 +66,10 @@ struct LiveStream {
     category_id: String,
     #[serde(default)]
     epg_channel_id: Option<String>,
+    #[serde(default)]
+    tv_archive: Option<String>,
+    #[serde(default)]
+    tv_archive_duration: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -289,6 +295,17 @@ impl XtreamClient {
         let mut channels = Vec::with_capacity(streams.len());
         for s in streams {
             let url = format!("{}/live/{}/{}/{}.m3u8", base, user, pass, s.stream_id);
+            let archive_on = matches!(s.tv_archive.as_deref(), Some("1") | Some("true"));
+            let (catchup_source, catchup_days) = if archive_on {
+                (
+                    Some("?utc={utc}&lutc={lutc}".to_string()),
+                    s.tv_archive_duration
+                        .filter(|v| !v.is_empty())
+                        .or_else(|| Some("7".to_string())),
+                )
+            } else {
+                (None, None)
+            };
             channels.push(XtreamChannel {
                 name: s.name,
                 url,
@@ -299,6 +316,8 @@ impl XtreamClient {
                 },
                 group: cat_name.get(&s.category_id).cloned(),
                 tvg_id: s.epg_channel_id.filter(|v| !v.is_empty()),
+                catchup_source,
+                catchup_days,
             });
         }
 
@@ -376,6 +395,8 @@ impl XtreamClient {
                 },
                 group: cat_name.get(&s.category_id).cloned(),
                 tvg_id: s.rating_key.filter(|v| !v.is_empty()),
+                catchup_source: None,
+                catchup_days: None,
             });
         }
 
@@ -430,6 +451,8 @@ impl XtreamClient {
                         icon: if sr.cover.is_empty() { None } else { Some(sr.cover.clone()) },
                         group: Some(sr.name.clone()),
                         tvg_id: None,
+                        catchup_source: None,
+                        catchup_days: None,
                     });
                 }
             }
