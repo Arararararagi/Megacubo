@@ -92,7 +92,7 @@ impl PlexClient {
 
     /// List libraries/sections on the server.
     pub async fn libraries(&self) -> Result<Vec<PlexLibrary>> {
-        let r: MediaContainer = self
+        let r: Root = self
             .req("/library/sections")
             .send()
             .await
@@ -100,12 +100,12 @@ impl PlexClient {
             .json()
             .await
             .map_err(|e| anyhow!("Plex libraries response invalid: {}", e))?;
-        Ok(r.directory.into_iter().map(PlexLibrary::from).collect())
+        Ok(r.container.directory.into_iter().map(PlexLibrary::from).collect())
     }
 
     /// List items (movies or series) in a section.
     pub async fn browse(&self, section: &str) -> Result<Vec<PlexItem>> {
-        let r: MediaContainer = self
+        let r: Root = self
             .req(&format!("/library/sections/{}/all", section))
             .send()
             .await
@@ -113,7 +113,7 @@ impl PlexClient {
             .json()
             .await
             .map_err(|e| anyhow!("Plex browse response invalid: {}", e))?;
-        Ok(r.metadata.into_iter().map(|m| self.to_item(m)).collect())
+        Ok(r.container.metadata.into_iter().map(|m| self.to_item(m)).collect())
     }
 
     /// List seasons of a series.
@@ -127,7 +127,7 @@ impl PlexClient {
     }
 
     async fn children_of(&self, rating_key: &str, want: &str) -> Result<Vec<PlexItem>> {
-        let r: MediaContainer = self
+        let r: Root = self
             .req(&format!("/library/metadata/{}/children", rating_key))
             .send()
             .await
@@ -136,6 +136,7 @@ impl PlexClient {
             .await
             .map_err(|e| anyhow!("Plex children response invalid: {}", e))?;
         Ok(r
+            .container
             .metadata
             .into_iter()
             .filter(|m| m.kind == want)
@@ -145,7 +146,7 @@ impl PlexClient {
 
     /// Resolve the direct-play URL + metadata for a movie/episode.
     pub async fn playable(&self, rating_key: &str) -> Result<PlexPlayable> {
-        let r: MediaContainer = self
+        let r: Root = self
             .req(&format!("/library/metadata/{}", rating_key))
             .send()
             .await
@@ -155,6 +156,7 @@ impl PlexClient {
             .map_err(|e| anyhow!("Plex metadata response invalid: {}", e))?;
 
         let meta = r
+            .container
             .metadata
             .into_iter()
             .next()
@@ -279,7 +281,7 @@ pub async fn poll_pin(id: &str, client_id: &str) -> Result<Option<String>> {
 
 /// Discover the user's Plex Media Servers from plex.tv.
 pub async fn fetch_servers(token: &str, client_id: &str) -> Result<Vec<PlexServer>> {
-    let r: ResourceContainer = reqwest::Client::new()
+    let r: Root = reqwest::Client::new()
         .get(format!(
             "{}/api/v2/resources?includeHttps=1&includeRelays=1",
             PLEX_TV
@@ -298,7 +300,7 @@ pub async fn fetch_servers(token: &str, client_id: &str) -> Result<Vec<PlexServe
         .map_err(|e| anyhow!("Plex resources response invalid: {}", e))?;
 
     let mut servers = Vec::new();
-    for dev in r.media_container.device {
+    for dev in r.container.device {
         let is_server = dev
             .provides
             .split(',')
@@ -340,12 +342,19 @@ fn pick_connection(conns: Vec<Connection>) -> Option<String> {
 
 #[derive(Debug, Default, Deserialize)]
 struct MediaContainer {
-    #[serde(default)]
+    #[serde(default, rename = "Directory")]
     directory: Vec<Directory>,
-    #[serde(default)]
+    #[serde(default, rename = "Metadata")]
     metadata: Vec<Metadata>,
-    #[serde(default)]
+    #[serde(default, rename = "Device")]
     device: Vec<Device>,
+}
+
+/// Top-level wrapper returned by Plex (`{"MediaContainer": {...}}`).
+#[derive(Debug, Deserialize)]
+struct Root {
+    #[serde(rename = "MediaContainer")]
+    container: MediaContainer,
 }
 
 #[derive(Debug, Deserialize)]
@@ -375,13 +384,13 @@ struct Metadata {
     index: Option<i64>,
     #[serde(default)]
     parentTitle: Option<String>,
-    #[serde(default)]
+    #[serde(default, rename = "Media")]
     media: Vec<Media>,
 }
 
 #[derive(Debug, Deserialize)]
 struct Media {
-    #[serde(default)]
+    #[serde(default, rename = "Part")]
     part: Vec<Part>,
 }
 
@@ -405,18 +414,12 @@ struct PinResponse {
 }
 
 #[derive(Debug, Deserialize)]
-struct ResourceContainer {
-    #[serde(default)]
-    media_container: MediaContainer,
-}
-
-#[derive(Debug, Deserialize)]
 struct Device {
     #[serde(default)]
     name: String,
     #[serde(default)]
     provides: String,
-    #[serde(default)]
+    #[serde(default, rename = "Connections")]
     connections: Vec<Connection>,
 }
 
@@ -482,5 +485,64 @@ mod tests {
     fn test_client_id_format() {
         let id = generate_client_id();
         assert!(id.starts_with("megacubo-"));
+    }
+
+    #[test]
+    fn test_parse_sections_json() {
+        let json = r#"{
+            "MediaContainer": {
+                "Directory": [
+                    {"key": "1", "title": "Movies", "type": "movie"},
+                    {"key": "2", "title": "TV Shows", "type": "show"}
+                ]
+            }
+        }"#;
+        let c: Root = serde_json::from_str(json).unwrap();
+        assert_eq!(c.container.directory.len(), 2);
+        assert_eq!(c.container.directory[0].key, "1");
+        assert_eq!(c.container.directory[0].kind, "movie");
+        assert_eq!(c.container.directory[1].kind, "show");
+    }
+
+    #[test]
+    fn test_parse_resources_json_picks_server() {
+        let json = r#"{
+            "MediaContainer": {
+                "Device": [
+                    {"name": "NAS", "provides": "server", "Connections": [
+                        {"protocol": "https", "uri": "https://192.168.1.10:32400", "local": true}
+                    ]},
+                    {"name": "Client", "provides": "player", "Connections": []}
+                ]
+            }
+        }"#;
+        let r: Root = serde_json::from_str(json).unwrap();
+        let servers: Vec<_> = r
+            .container
+            .device
+            .into_iter()
+            .filter(|d| d.provides.split(',').any(|p| p.trim().eq_ignore_ascii_case("server")))
+            .filter_map(|d| pick_connection(d.connections))
+            .collect();
+        assert_eq!(servers, vec!["https://192.168.1.10:32400".to_string()]);
+    }
+
+    #[test]
+    fn test_parse_metadata_json_and_play_url() {
+        let json = r#"{
+            "MediaContainer": {
+                "Metadata": [
+                    {"ratingKey": "555", "title": "Big Movie", "year": 2021,
+                     "thumb": "/library/metadata/555/thumb", "type": "movie",
+                     "Media": [{"Part": [{"id": 42, "key": "/library/parts/42/file.mp4"}]}]}
+                ]
+            }
+        }"#;
+        let c: Root = serde_json::from_str(json).unwrap();
+        let meta = &c.container.metadata[0];
+        assert_eq!(meta.ratingKey, "555");
+        let client = PlexClient::new("http://h:32400".into(), "T".into(), "cid".into());
+        let url = client.direct_play_url(meta).unwrap();
+        assert_eq!(url, "http://h:32400/library/parts/42/file.mp4?X-Plex-Token=T");
     }
 }
