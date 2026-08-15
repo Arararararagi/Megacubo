@@ -67,7 +67,7 @@ Rewrite the Electron/JS-based Megacubo IPTV player in Rust, using **Tauri v2** a
 
 ### 3.5 Functional UI (`dist/index.html`)
 - Replaced the placeholder with a self-contained vanilla-JS app (no build step) driven by `window.__TAURI__.core.invoke` (global Tauri enabled via `app.withGlobalTauri`).
-- Features: **add playlist** (M3U URL + optional EPG URL), **channel grid** per list with **Play / ▶ App / Bookmark / EPG** actions, **search**, **bookmarks** and **history** lists, an **EPG schedule** view (current + upcoming programmes), and a dedicated **Plex tab** (sign in with Plex → libraries → movies/series → seasons → episodes → play in-app or external). The **▶ App** button (shown only when the binary was built with the `media` feature) plays in-app via libmpv and shows a player bar (play/pause/stop, seek, volume). External **Play** launches the OS default / VLC. Playback records history; bookmarking records bookmarks. Channels persist in SQLite so they survive restarts (reloaded on launch).
+- Features: **add playlist** (M3U URL + optional EPG URL, type selector M3U/Xtream), **channel grid** per list with **Play / ▶ App / Bookmark / EPG** actions (plus **⏪ Catchup** when the channel supports time-shift), **search**, **bookmarks** and **history** lists, an **EPG schedule** view (current + upcoming programmes), a **Settings tab** (theme dark/light applied live, external-player override, hardware-accel toggle, EPG auto-update + interval), and a dedicated **Plex tab** (sign in with Plex → libraries → movies/series → seasons → episodes → play in-app or external). The **▶ App** button (shown only when the binary was built with the `media` feature) plays in-app via libmpv and shows a player bar (play/pause/stop, seek, volume). External **Play** launches the OS default / VLC. Playback records history; bookmarking records bookmarks. Channels persist in SQLite so they survive restarts (reloaded on launch).
 - `tauri.conf.json` embeds `dist/` at build time; `frontendDist` = `dist`, `withGlobalTauri` = `true`.
 
 ## 4. Build & Run Status
@@ -77,7 +77,7 @@ Rewrite the Electron/JS-based Megacubo IPTV player in Rust, using **Tauri v2** a
 | `cargo check` | ✅ passes |
 | `cargo build --features desktop` | ✅ compiles the GUI binary (embeds `dist/` UI) |
 | `cargo build --features desktop,media` | ✅ compiles with libmpv in-app playback (needs system `libmpv`; see `.cargo/config.toml`) |
-| `cargo test --lib` | ✅ 26 tests pass |
+| `cargo test --lib` | ✅ 30 tests pass |
 | `cargo run --features desktop` | launches the native window (functional UI) |
 
 The `desktop` binary embeds the `dist/` frontend at build time. GUI runtime requires a desktop session (cannot be exercised in a headless CI here), but the build, JS syntax, and all backend commands are verified by tests.
@@ -87,12 +87,11 @@ The `desktop` binary embeds the `dist/` frontend at build time. GUI runtime requ
 - **M3U parser**: `catchup`/`tvg-shift`, `#EXTGRP`, HLS `#EXT-X-STREAM-INF`, BOM, and relative URLs are handled. Still missing: selecting the best HLS variant automatically, UTF-8 encoding detection beyond BOM, and entries lacking any `#EXTINF`.
 - **Discovery** has local CRUD only — no cloud fetch / health scoring.
 - **Playback**: external-player launch is fully wired. **In-app playback (libmpv)** is implemented behind the `media` feature and requires the system `libmpv` library at link time (`.cargo/config.toml` sets the macOS Homebrew path). When built without `media`, the UI gracefully hides the in-app buttons.
-- **Settings panel** (`dist/index.html`): theme (dark/light, applied live), external player override (honored by `launch_external_player`), hardware-acceleration toggle, EPG auto-update toggle + interval. Persisted via `Config`; `get_settings`/`set_settings` commands (settings view excludes the secret Plex token). Startup EPG auto-refresh is now gated by the `auto_update_epg` setting.
 - **Xtream**: live TV (categories/streams + auto EPG), **VOD/movies**, and **Series episodes** are all fetched and stored as channels (grouped by category/series). VOD uses `/vod/...`, series uses `/series/...` direct-play URLs.
-- **Catch-up TV**: channel cards with `catchup-days`/`catchup-source` (M3U) or Xtream `tv_archive` show a "⏪ Catchup" button → datetime picker → `catchup_url` command builds `{url}?utc={start}&lutc={end}` and plays the time-shifted stream.
 - **Plex**: Movies + TV Shows browse/play (direct-play) + manage (mark watched/unwatched, refresh metadata) are supported. Not yet covered: **transcoding** (Plex direct-play URL only), music libraries, and destructive ops (delete/edit metadata). MAG playlists are still unsupported.
 - **Android**: explicitly out of scope (desktop-only app).
-- **UI**: functional but minimal (vanilla JS, no framework, no video embedding inside the webview — libmpv opens its own native window; no settings, no catchup-playback UI). Intended as a usable baseline, not final design.
+- **MAG** portal playlists are not yet supported.
+- **UI**: functional but minimal (vanilla JS, no framework, no video embedding inside the webview — libmpv opens its own native window). Settings, catch-up picker, Plex tab and player bar are present. Intended as a usable baseline, not final design.
 
 ## 6. Next Steps (prioritized)
 
