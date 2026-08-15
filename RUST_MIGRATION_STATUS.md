@@ -77,7 +77,7 @@ Rewrite the Electron/JS-based Megacubo IPTV player in Rust, using **Tauri v2** a
 | `cargo check` | ✅ passes |
 | `cargo build --features desktop` | ✅ compiles the GUI binary (embeds `dist/` UI) |
 | `cargo build --features desktop,media` | ✅ compiles with libmpv in-app playback (needs system `libmpv`; see `.cargo/config.toml`) |
-| `cargo test --lib` | ✅ 30 tests pass |
+| `cargo test --lib` | ✅ 31 tests pass |
 | `cargo run --features desktop` | launches the native window (functional UI) |
 
 The `desktop` binary embeds the `dist/` frontend at build time. GUI runtime requires a desktop session (cannot be exercised in a headless CI here), but the build, JS syntax, and all backend commands are verified by tests.
@@ -85,9 +85,10 @@ The `desktop` binary embeds the `dist/` frontend at build time. GUI runtime requ
 ## 5. Known Gaps / Limitations
 - **EPG**: channels without a `tvg-id` won't match EPG data (XMLTV keyed by channel id). Startup auto-refresh is wired (gated by the `auto_update_epg` setting) but there is no periodic/repeating refresh or progress reporting yet.
 - **M3U parser**: `catchup`/`tvg-shift`, `#EXTGRP`, HLS `#EXT-X-STREAM-INF`, BOM, and relative URLs are handled. Still missing: selecting the best HLS variant automatically, UTF-8 encoding detection beyond BOM, and entries lacking any `#EXTINF`.
-- **Discovery** has local CRUD only — no cloud fetch / health scoring.
+- **Discovery**: curated iptv-org sources are seeded and addable, but there is no **health scoring**/reachability probe or user-added custom community sources yet (the `discovery` table supports both; `health` column unused for now).
 - **Playback**: external-player launch is fully wired. **In-app playback (libmpv)** is implemented behind the `media` feature and requires the system `libmpv` library at link time (`.cargo/config.toml` sets the macOS Homebrew path). When built without `media`, the UI gracefully hides the in-app buttons.
 - **Xtream**: live TV (categories/streams + auto EPG), **VOD/movies**, and **Series episodes** are all fetched and stored as channels (grouped by category/series). VOD uses `/vod/...`, series uses `/series/...` direct-play URLs.
+- **Discovery (community lists)**: curated public sources (iptv-org all/category/country playlists) are seeded into the `discovery` table on first launch and shown in a **Discover tab** with one-click "Add" (calls `add_m3u_list`). `get_discovery` Tauri command returns the sources.
 - **Plex**: Movies + TV Shows browse/play (direct-play) + manage (mark watched/unwatched, refresh metadata) are supported. Not yet covered: **transcoding** (Plex direct-play URL only), music libraries, and destructive ops (delete/edit metadata). MAG playlists are still unsupported.
 - **Android**: explicitly out of scope (desktop-only app).
 - **MAG** portal playlists are not yet supported.

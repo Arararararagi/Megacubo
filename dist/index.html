@@ -135,6 +135,7 @@
       <button data-tab="history">History</button>
       <button data-tab="epg">EPG</button>
       <button data-tab="plex">Plex</button>
+      <button data-tab="discover">Discover</button>
       <button data-tab="settings">Settings</button>
     </div>
 
@@ -191,6 +192,14 @@
           </div>
           <div class="crumbs" id="plex-crumbs" style="margin:6px 0;color:var(--muted);font-size:13px"></div>
           <div class="grid" id="plex-grid"></div>
+        </div>
+      </section>
+
+      <section id="panel-discover" hidden>
+        <div class="panel-box">
+          <h2>Discover community lists</h2>
+          <p class="meta">Curated public playlists. Click “Add” to load channels into your library.</p>
+          <div id="discover-list"></div>
         </div>
       </section>
 
@@ -753,6 +762,54 @@
         }
       }
 
+      async function loadDiscovery() {
+        const box = $("discover-list");
+        box.innerHTML = "<div class='meta'>Loading…</div>";
+        try {
+          const sources = await invoke("get_discovery");
+          box.innerHTML = "";
+          if (!sources.length) {
+            box.innerHTML = "<div class='meta'>No community sources available.</div>";
+            return;
+          }
+          for (const s of sources) {
+            const row = document.createElement("div");
+            row.className = "row";
+            const grow = document.createElement("div");
+            grow.className = "grow";
+            const name = document.createElement("div");
+            name.className = "name";
+            name.textContent = s.name || s.url;
+            const sub = document.createElement("div");
+            sub.className = "sub";
+            sub.textContent = (s.entry_type || "") + " · " + s.url;
+            grow.appendChild(name);
+            grow.appendChild(sub);
+            row.appendChild(grow);
+
+            const add = document.createElement("button");
+            add.textContent = "Add";
+            add.onclick = async () => {
+              add.disabled = true;
+              add.textContent = "Adding…";
+              try {
+                const msg = await invoke("add_m3u_list", { url: s.url, epgUrl: "" });
+                setStatus(msg);
+              } catch (e) {
+                setStatus("Failed to add: " + e, true);
+              } finally {
+                add.disabled = false;
+                add.textContent = "Add";
+              }
+            };
+            row.appendChild(add);
+            box.appendChild(row);
+          }
+        } catch (e) {
+          box.innerHTML = "<div class='meta'>Error: " + e + "</div>";
+        }
+      }
+
       async function loadHistory() {
         try {
           const hist = await invoke("get_history", { limit: 50 });
@@ -780,6 +837,7 @@
           if (t === "bookmarks") loadBookmarks();
           if (t === "history") loadHistory();
           if (t === "plex") plexInit();
+          if (t === "discover") loadDiscovery();
           if (t === "settings") loadSettings();
         })
       );

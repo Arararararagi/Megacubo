@@ -10,6 +10,7 @@ pub mod parser;
 pub mod streamer;
 pub mod xtream;
 pub mod plex;
+pub mod discovery;
 
 // Re-export main types
 pub use db::{Database, default_db_path};

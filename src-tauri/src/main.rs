@@ -13,7 +13,7 @@ mod app {
         ListManager, Streamer,
         config::{Config, PlexConfig, Settings},
         db::Channel, epg::{EpgManager, EpgProgramme},
-        lists::{List, ListType, ListStatus}, parser::M3uEntry,
+        lists::{List, ListType, ListStatus, DiscoveryManager, DiscoveryEntry}, parser::M3uEntry,
         xtream::{XtreamCredentials, XtreamChannel},
         plex::{PlexClient, PlexPin, PlexServer, PlexLibrary, PlexItem, PlexPlayable,
                generate_client_id, create_pin, poll_pin, fetch_servers},
@@ -52,6 +52,31 @@ mod app {
                     }
                 });
 
+                // Seed the Discovery (community) table with curated public
+                // sources on first launch, so the Discover tab is populated.
+                let seed_db = db.clone();
+                tauri::async_runtime::spawn(async move {
+                    let dm = DiscoveryManager::new(seed_db.pool().clone());
+                    if let Ok(existing) = dm.get_all().await {
+                        if existing.is_empty() {
+                            for s in megacubo::discovery::sources() {
+                                let _ = dm
+                                    .add(&DiscoveryEntry {
+                                        id: None,
+                                        url: s.url,
+                                        name: Some(s.name),
+                                        entry_type: "iptv-org".to_string(),
+                                        image: None,
+                                        health: None,
+                                        last_seen: None,
+                                    })
+                                    .await;
+                            }
+                            info!("Seeded {} discovery sources", megacubo::discovery::sources().len());
+                        }
+                    }
+                });
+
                 app.manage(db);
 
                 #[cfg(feature = "media")]
@@ -82,6 +107,7 @@ mod app {
                 refresh_epg,
                 get_epg_schedule,
                 catchup_url,
+                get_discovery,
                 launch_external_player,
                 plex_login_start,
                 plex_login_poll,
@@ -124,6 +150,7 @@ mod app {
                 refresh_epg,
                 get_epg_schedule,
                 catchup_url,
+                get_discovery,
                 launch_external_player,
                 plex_login_start,
                 plex_login_poll,
@@ -297,6 +324,17 @@ mod app {
         end_utc: Option<i64>,
     ) -> String {
         megacubo::parser::build_catchup_url(&channel_url, &catchup_source, start_utc, end_utc)
+    }
+
+    /// Return the curated community (Discovery) sources.
+    #[tauri::command]
+    async fn get_discovery(
+        db: tauri::State<'_, Database>,
+    ) -> Result<Vec<megacubo::lists::DiscoveryEntry>, String> {
+        DiscoveryManager::new(db.pool().clone())
+            .get_all()
+            .await
+            .map_err(|e| e.to_string())
     }
 
     // ----- Plex -----
