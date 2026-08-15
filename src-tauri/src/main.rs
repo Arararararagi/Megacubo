@@ -217,10 +217,21 @@ mod app {
         let epg_url = client.epg_url();
         let _ = list_manager.set_epg_url(&auth.base_url, &epg_url).await;
 
-        let streams: Vec<XtreamChannel> = client
+        let mut streams: Vec<XtreamChannel> = client
             .get_live_streams()
             .await
             .map_err(|e| e.to_string())?;
+
+        if let Ok(vod) = client.get_vod_streams().await {
+            let n = vod.len();
+            streams.extend(vod);
+            info!("Xtream: added {} VOD titles", n);
+        }
+        if let Ok(series) = client.get_series_episodes().await {
+            let n = series.len();
+            streams.extend(series);
+            info!("Xtream: added {} series episodes", n);
+        }
 
         let count = streams.len();
         for s in &streams {

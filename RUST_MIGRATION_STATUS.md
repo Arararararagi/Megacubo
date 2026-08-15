@@ -88,7 +88,7 @@ The `desktop` binary embeds the `dist/` frontend at build time. GUI runtime requ
 - **Discovery** has local CRUD only — no cloud fetch / health scoring.
 - **Playback**: external-player launch is fully wired. **In-app playback (libmpv)** is implemented behind the `media` feature and requires the system `libmpv` library at link time (`.cargo/config.toml` sets the macOS Homebrew path). When built without `media`, the UI gracefully hides the in-app buttons.
 - **Settings panel** (`dist/index.html`): theme (dark/light, applied live), external player override (honored by `launch_external_player`), hardware-acceleration toggle, EPG auto-update toggle + interval. Persisted via `Config`; `get_settings`/`set_settings` commands (settings view excludes the secret Plex token). Startup EPG auto-refresh is now gated by the `auto_update_epg` setting.
-- **Xtream**: live TV categories/streams are supported (incl. auto EPG), but **VOD and Series** are not yet fetched/stored.
+- **Xtream**: live TV (categories/streams + auto EPG), **VOD/movies**, and **Series episodes** are all fetched and stored as channels (grouped by category/series). VOD uses `/vod/...`, series uses `/series/...` direct-play URLs.
 - **Plex**: Movies + TV Shows browse/play (direct-play) + manage (mark watched/unwatched, refresh metadata) are supported. Not yet covered: **transcoding** (Plex direct-play URL only), music libraries, and destructive ops (delete/edit metadata). MAG playlists are still unsupported.
 - **Android**: explicitly out of scope (desktop-only app).
 - **UI**: functional but minimal (vanilla JS, no framework, no video embedding inside the webview — libmpv opens its own native window; no settings, no catchup-playback UI). Intended as a usable baseline, not final design.

@@ -62,8 +62,54 @@ struct LiveStream {
     stream_icon: String,
     #[serde(default)]
     category_id: String,
-    #[serde(default, rename = "epg_channel_id")]
+    #[serde(default)]
     epg_channel_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct VodStream {
+    #[serde(default)]
+    stream_id: i64,
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    stream_icon: String,
+    #[serde(default)]
+    category_id: String,
+    #[serde(default)]
+    container_extension: String,
+    #[serde(default)]
+    rating_key: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SeriesItem {
+    #[serde(default)]
+    series_id: i64,
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    cover: String,
+    #[serde(default)]
+    category_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct SeriesInfo {
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    seasons: std::collections::HashMap<String, Vec<Episode>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct Episode {
+    #[serde(default)]
+    id: i64,
+    #[serde(default)]
+    title: String,
+    #[serde(default)]
+    container_extension: String,
 }
 
 /// Client for the Xtream Codes `player_api.php` API.
@@ -260,6 +306,139 @@ impl XtreamClient {
         Ok(channels)
     }
 
+    /// Build a VOD (movie) direct-play URL.
+    pub fn vod_url(&self, stream_id: i64, ext: &str) -> String {
+        format!(
+            "{}/vod/{}/{}/{}.{}",
+            self.creds.base_url, self.creds.username, self.creds.password, stream_id, ext
+        )
+    }
+
+    /// Build a Series episode direct-play URL.
+    pub fn series_url(&self, episode_id: i64, ext: &str) -> String {
+        format!(
+            "{}/series/{}/{}/{}.{}",
+            self.creds.base_url, self.creds.username, self.creds.password, episode_id, ext
+        )
+    }
+
+    /// Fetch VOD (movie) categories + streams, returning playable channels.
+    pub async fn get_vod_streams(&self) -> Result<Vec<XtreamChannel>> {
+        let base = &self.creds.base_url;
+        let user = &self.creds.username;
+        let pass = &self.creds.password;
+
+        let cats: Vec<Category> = self
+            .http
+            .get(format!(
+                "{}/player_api.php?username={}&password={}&action=get_vod_categories",
+                base, user, pass
+            ))
+            .send()
+            .await
+            .map_err(|e| anyhow!("Xtream VOD categories request failed: {}", e))?
+            .json()
+            .await
+            .map_err(|e| anyhow!("Xtream VOD categories response invalid: {}", e))?;
+
+        let cat_name: std::collections::HashMap<String, String> = cats
+            .into_iter()
+            .map(|c| (c.category_id, c.category_name))
+            .collect();
+
+        let streams: Vec<VodStream> = self
+            .http
+            .get(format!(
+                "{}/player_api.php?username={}&password={}&action=get_vod_streams",
+                base, user, pass
+            ))
+            .send()
+            .await
+            .map_err(|e| anyhow!("Xtream VOD request failed: {}", e))?
+            .json()
+            .await
+            .map_err(|e| anyhow!("Xtream VOD response invalid: {}", e))?;
+
+        let mut channels = Vec::with_capacity(streams.len());
+        for s in streams {
+            let ext = if s.container_extension.is_empty() {
+                "mp4".to_string()
+            } else {
+                s.container_extension.clone()
+            };
+            channels.push(XtreamChannel {
+                name: s.name,
+                url: self.vod_url(s.stream_id, &ext),
+                icon: if s.stream_icon.is_empty() {
+                    None
+                } else {
+                    Some(s.stream_icon)
+                },
+                group: cat_name.get(&s.category_id).cloned(),
+                tvg_id: s.rating_key.filter(|v| !v.is_empty()),
+            });
+        }
+
+        info!("Xtream: resolved {} VOD streams", channels.len());
+        Ok(channels)
+    }
+
+    /// Fetch Series and all of their episodes, returning playable channels.
+    pub async fn get_series_episodes(&self) -> Result<Vec<XtreamChannel>> {
+        let base = &self.creds.base_url;
+        let user = &self.creds.username;
+        let pass = &self.creds.password;
+
+        let series: Vec<SeriesItem> = self
+            .http
+            .get(format!(
+                "{}/player_api.php?username={}&password={}&action=get_series",
+                base, user, pass
+            ))
+            .send()
+            .await
+            .map_err(|e| anyhow!("Xtream series request failed: {}", e))?
+            .json()
+            .await
+            .map_err(|e| anyhow!("Xtream series response invalid: {}", e))?;
+
+        let mut channels = Vec::new();
+        for sr in series {
+            let info: SeriesInfo = self
+                .http
+                .get(format!(
+                    "{}/player_api.php?username={}&password={}&action=get_series_info&series_id={}",
+                    base, user, pass, sr.series_id
+                ))
+                .send()
+                .await
+                .map_err(|e| anyhow!("Xtream series info request failed: {}", e))?
+                .json()
+                .await
+                .map_err(|e| anyhow!("Xtream series info response invalid: {}", e))?;
+
+            for (_season, eps) in info.seasons {
+                for ep in eps {
+                    let ext = if ep.container_extension.is_empty() {
+                        "mp4".to_string()
+                    } else {
+                        ep.container_extension.clone()
+                    };
+                    channels.push(XtreamChannel {
+                        name: format!("{} — {}", sr.name, ep.title),
+                        url: self.series_url(ep.id, &ext),
+                        icon: if sr.cover.is_empty() { None } else { Some(sr.cover.clone()) },
+                        group: Some(sr.name.clone()),
+                        tvg_id: None,
+                    });
+                }
+            }
+        }
+
+        info!("Xtream: resolved {} series episodes", channels.len());
+        Ok(channels)
+    }
+
     /// Build the XMLTV EPG URL for this provider (commonly `/xmltv.php`).
     pub fn epg_url(&self) -> String {
         format!(
@@ -314,5 +493,17 @@ mod tests {
     fn test_from_url_invalid() {
         assert!(XtreamCredentials::from_url("http://host:8080/justone").is_err());
         assert!(XtreamCredentials::from_url("not a url").is_err());
+    }
+
+    #[test]
+    fn test_vod_and_series_urls() {
+        let c = XtreamCredentials {
+            base_url: "http://host:8080".into(),
+            username: "u".into(),
+            password: "p".into(),
+        }
+        .client();
+        assert_eq!(c.vod_url(7, "mkv"), "http://host:8080/vod/u/p/7.mkv");
+        assert_eq!(c.series_url(9, "mp4"), "http://host:8080/series/u/p/9.mp4");
     }
 }
