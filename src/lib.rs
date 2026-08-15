@@ -9,6 +9,7 @@ pub mod lists;
 pub mod parser;
 pub mod streamer;
 pub mod xtream;
+pub mod plex;
 
 // Re-export main types
 pub use db::{Database, default_db_path};
@@ -17,6 +18,7 @@ pub use epg::{EpgProgramme, EpgChannel, XmltvChannel, XmltvProgramme, parse_xmlt
 pub use lists::{List, ListType, ListStatus, ListManager, DiscoveryEntry, DiscoveryType, DiscoveryManager};
 pub use streamer::{Streamer, StreamInfo, StreamType};
 pub use xtream::{XtreamCredentials, XtreamClient, XtreamChannel};
+pub use plex::{PlexClient, PlexLibrary, PlexItem, PlexPlayable, PlexServer, PlexPin, generate_client_id};
 
 /// Initialize the Megacubo library
 pub async fn init() -> anyhow::Result<Database> {

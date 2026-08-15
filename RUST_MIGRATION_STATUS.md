@@ -7,7 +7,7 @@ Rewrite the Electron/JS-based Megacubo IPTV player in Rust, using **Tauri v2** a
 
 ## 2. Current Architecture
 - **Package**: `megacubo-rs` (root `Cargo.toml`), edition 2021. Produces a `lib` (+ `cdylib`) crate `megacubo` and a `bin` `megacubo`.
-- **Library source**: `src/` → `config`, `db`, `epg`, `lists`, `parser`, `streamer` (`src/lib.rs` re-exports the public API).
+- **Library source**: `src/` → `config`, `db`, `epg`, `lists`, `parser`, `streamer`, `xtream`, `plex` (`src/lib.rs` re-exports the public API).
 - **Desktop entry**: `src-tauri/src/main.rs` (Tauri commands + setup).
 - **Config/asset files** (repo root): `tauri.conf.json` (v2 schema), `build.rs`, `dist/index.html`, `icons/icon.png`.
 - **Targets**: Windows, macOS, Linux (desktop-only; no Android).
@@ -62,11 +62,12 @@ Rewrite the Electron/JS-based Megacubo IPTV player in Rust, using **Tauri v2** a
 - **Tauri commands wired**: `add_m3u_list` (streaming + accepts an optional EPG URL + resolves relative URLs), `get_lists`, `get_channels`, `search_channels`, `add_bookmark`/`get_bookmarks`, `add_history`/`get_history`, `refresh_epg`, `get_epg_schedule`, `launch_external_player`. `ListManager` gained `set_epg_url`/`get_by_url`.
 - **In-app playback (libmpv)**: behind the `media` feature. `streamer::MpvPlayer` wraps `libmpv::Mpv` (a managed `PlayerState` in the Tauri app). Tauri commands `init_player`, `play_in_app`, `pause_in_app`, `resume_in_app`, `stop_in_app`, `set_volume`, `get_time`, `get_duration`, `seek` drive playback. Requires the system `libmpv` library at link time (see `.cargo/config.toml` for the macOS Homebrew path).
 - **Xtream Codes support**: `xtream::XtreamClient` parses provider URLs (path `/user/pass`, `/c/user/pass`, `player_api.php?username=…&password=…`), authenticates, and fetches live categories + streams. `add_xtream_list` Tauri command stores channels (`{base}/live/{user}/{pass}/{id}.m3u8`) into the channels, auto-wires the provider's XMLTV EPG (`/xmltv.php`). UI has an M3U/Xtream type selector.
+- **Plex support**: `plex::PlexClient` (full **PIN/OAuth login** via `clients.plex.tv` → server discovery → chosen connection) browses **Movies + TV Shows** (sections → series → seasons → episodes) and resolves **direct-play** URLs (`/library/parts/<id>/file?X-Plex-Token=…`). `PlexConfig` persists token + server in `config.json`. Tauri commands: `plex_login_start`, `plex_login_poll`, `plex_servers`, `plex_save_server`, `plex_libraries`, `plex_browse`, `plex_seasons`, `plex_episodes`, `plex_item_url`. Playback reuses the existing `play_in_app` / `launch_external_player` (mpv plays the Plex HTTP URL directly — **no transcoding** in v1). Dedicated **Plex tab** in the UI.
 - **EPG auto-refresh**: on launch, the app refreshes the XMLTV guide for every list that has an `epg_url` wired (background task), so the schedule is populated without manual clicks. `remove_list` deletes a playlist and all its channels; UI has a **Remove** button.
 
 ### 3.5 Functional UI (`dist/index.html`)
 - Replaced the placeholder with a self-contained vanilla-JS app (no build step) driven by `window.__TAURI__.core.invoke` (global Tauri enabled via `app.withGlobalTauri`).
-- Features: **add playlist** (M3U URL + optional EPG URL), **channel grid** per list with **Play / ▶ App / Bookmark / EPG** actions, **search**, **bookmarks** and **history** lists, and an **EPG schedule** view (current + upcoming programmes). The **▶ App** button (shown only when the binary was built with the `media` feature) plays in-app via libmpv and shows a player bar (play/pause/stop, seek, volume). External **Play** launches the OS default / VLC. Playback records history; bookmarking records bookmarks. Channels persist in SQLite so they survive restarts (reloaded on launch).
+- Features: **add playlist** (M3U URL + optional EPG URL), **channel grid** per list with **Play / ▶ App / Bookmark / EPG** actions, **search**, **bookmarks** and **history** lists, an **EPG schedule** view (current + upcoming programmes), and a dedicated **Plex tab** (sign in with Plex → libraries → movies/series → seasons → episodes → play in-app or external). The **▶ App** button (shown only when the binary was built with the `media` feature) plays in-app via libmpv and shows a player bar (play/pause/stop, seek, volume). External **Play** launches the OS default / VLC. Playback records history; bookmarking records bookmarks. Channels persist in SQLite so they survive restarts (reloaded on launch).
 - `tauri.conf.json` embeds `dist/` at build time; `frontendDist` = `dist`, `withGlobalTauri` = `true`.
 
 ## 4. Build & Run Status
@@ -76,7 +77,7 @@ Rewrite the Electron/JS-based Megacubo IPTV player in Rust, using **Tauri v2** a
 | `cargo check` | ✅ passes |
 | `cargo build --features desktop` | ✅ compiles the GUI binary (embeds `dist/` UI) |
 | `cargo build --features desktop,media` | ✅ compiles with libmpv in-app playback (needs system `libmpv`; see `.cargo/config.toml`) |
-| `cargo test --lib` | ✅ 16 tests pass |
+| `cargo test --lib` | ✅ 20 tests pass |
 | `cargo run --features desktop` | launches the native window (functional UI) |
 
 The `desktop` binary embeds the `dist/` frontend at build time. GUI runtime requires a desktop session (cannot be exercised in a headless CI here), but the build, JS syntax, and all backend commands are verified by tests.
@@ -84,10 +85,10 @@ The `desktop` binary embeds the `dist/` frontend at build time. GUI runtime requ
 ## 5. Known Gaps / Limitations
 - **EPG**: `refresh_epg` exists but there's no scheduled/background auto-refresh or progress reporting yet. EPG is keyed by XMLTV `channel` id (matching `tvg-id`); channels without a `tvg-id` won't match EPG data.
 - **M3U parser**: `catchup`/`tvg-shift`, `#EXTGRP`, HLS `#EXT-X-STREAM-INF`, BOM, and relative URLs are handled. Still missing: selecting the best HLS variant automatically, UTF-8 encoding detection beyond BOM, and entries lacking any `#EXTINF`.
-- **No Xtream / MAG** support (only M3U type in `ListManager`).
 - **Discovery** has local CRUD only — no cloud fetch / health scoring.
 - **Playback**: external-player launch is fully wired. **In-app playback (libmpv)** is implemented behind the `media` feature and requires the system `libmpv` library at link time (`.cargo/config.toml` sets the macOS Homebrew path). When built without `media`, the UI gracefully hides the in-app buttons.
 - **Xtream**: live TV categories/streams are supported (incl. auto EPG), but **VOD and Series** are not yet fetched/stored.
+- **Plex**: Movies + TV Shows browse/play (direct-play) are supported. Not yet covered: **transcoding** (Plex direct-play URL only), music libraries, and "manage" operations (mark watched, refresh metadata, delete). MAG playlists are still unsupported.
 - **Android**: explicitly out of scope (desktop-only app).
 - **UI**: functional but minimal (vanilla JS, no framework, no video embedding inside the webview — libmpv opens its own native window; no settings, no catchup-playback UI). Intended as a usable baseline, not final design.
 

@@ -120,6 +120,7 @@
       <button data-tab="bookmarks">Bookmarks</button>
       <button data-tab="history">History</button>
       <button data-tab="epg">EPG</button>
+      <button data-tab="plex">Plex</button>
     </div>
 
     <div class="status" id="status"></div>
@@ -155,6 +156,27 @@
           <span id="epg-channel">Select a channel and click “EPG” to see its schedule.</span>
         </div>
         <div id="epg-list"></div>
+      </section>
+
+      <section id="panel-plex" hidden>
+        <div id="plex-login" class="empty">
+          <p>Connect your Plex account to browse and play your library.</p>
+          <button id="plex-signin">Sign in with Plex</button>
+          <div id="plex-pin" style="display:none;margin-top:12px">
+            <p>Approve this code in your browser:</p>
+            <p>Code: <b id="plex-code"></b></p>
+            <p><a id="plex-link" target="_blank" rel="noopener">Open Plex auth…</a></p>
+            <p class="meta" id="plex-status">Waiting for approval…</p>
+          </div>
+        </div>
+        <div id="plex-browse" style="display:none">
+          <div class="toolbar">
+            <select id="plex-library"></select>
+            <button class="ghost" id="plex-disconnect">Disconnect</button>
+          </div>
+          <div class="crumbs" id="plex-crumbs" style="margin:6px 0;color:var(--muted);font-size:13px"></div>
+          <div class="grid" id="plex-grid"></div>
+        </div>
       </section>
     </main>
 
@@ -646,8 +668,214 @@
           const t = b.dataset.tab;
           if (t === "bookmarks") loadBookmarks();
           if (t === "history") loadHistory();
+          if (t === "plex") plexInit();
         })
       );
+
+      // ---------- Plex ----------
+      let plexNav = [];
+      let plexPinTimer = null;
+
+      async function plexInit() {
+        try {
+          await invoke("plex_libraries");
+          $("plex-login").style.display = "none";
+          $("plex-browse").style.display = "block";
+          await plexLoadLibraries();
+        } catch (e) {
+          $("plex-login").style.display = "block";
+          $("plex-browse").style.display = "none";
+        }
+      }
+
+      async function plexLoadLibraries() {
+        const libs = await invoke("plex_libraries");
+        const sel = $("plex-library");
+        sel.innerHTML = "";
+        libs.forEach((l) => {
+          const o = document.createElement("option");
+          o.value = l.key;
+          o.textContent = l.title + " (" + l.kind + ")";
+          sel.appendChild(o);
+        });
+        if (libs.length) plexBrowseSection(libs[0].key, libs[0].title);
+      }
+
+      $("plex-signin").addEventListener("click", async () => {
+        try {
+          const pin = await invoke("plex_login_start");
+          $("plex-pin").style.display = "block";
+          $("plex-code").textContent = pin.code;
+          $("plex-link").href = pin.linkUrl;
+          setStatus("Approve the code on plex.tv…");
+          if (plexPinTimer) clearInterval(plexPinTimer);
+          plexPinTimer = setInterval(async () => {
+            try {
+              const token = await invoke("plex_login_poll", { pinId: pin.id });
+              if (token) {
+                clearInterval(plexPinTimer);
+                plexPinTimer = null;
+                const servers = await invoke("plex_servers", { token });
+                if (!servers.length) {
+                  setStatus("No Plex servers found for this account.", true);
+                  return;
+                }
+                const s = servers[0];
+                await invoke("plex_save_server", {
+                  serverUrl: s.url,
+                  name: s.name,
+                  token,
+                });
+                setStatus("Connected to " + s.name);
+                $("plex-pin").style.display = "none";
+                $("plex-login").style.display = "none";
+                $("plex-browse").style.display = "block";
+                await plexLoadLibraries();
+              }
+            } catch (e) {
+              clearInterval(plexPinTimer);
+              plexPinTimer = null;
+              setStatus("Plex login failed: " + e, true);
+            }
+          }, 2000);
+        } catch (e) {
+          setStatus("Plex login start failed: " + e, true);
+        }
+      });
+
+      $("plex-disconnect").addEventListener("click", async () => {
+        try {
+          await invoke("plex_save_server", { serverUrl: "", name: "", token: "" });
+          plexNav = [];
+          $("plex-browse").style.display = "none";
+          $("plex-login").style.display = "block";
+          setStatus("Disconnected from Plex");
+        } catch (e) {
+          setStatus("Failed to disconnect: " + e, true);
+        }
+      });
+
+      $("plex-library").addEventListener("change", (e) => {
+        const o = e.target.selectedOptions[0];
+        plexBrowseSection(e.target.value, o ? o.textContent : "");
+      });
+
+      async function plexBrowseSection(key, title) {
+        plexNav = [];
+        try {
+          const items = await invoke("plex_browse", { section: key });
+          plexRenderCrumbs(title);
+          plexShowItems(items);
+        } catch (e) {
+          setStatus("Failed to load library: " + e, true);
+        }
+      }
+
+      function plexRenderCrumbs(current) {
+        const cr = $("plex-crumbs");
+        cr.innerHTML = "";
+        plexNav.forEach((n, i) => {
+          const a = document.createElement("a");
+          a.href = "#";
+          a.textContent = n.title;
+          a.style.cursor = "pointer";
+          a.style.color = "var(--accent)";
+          a.addEventListener("click", () => {
+            plexNav = plexNav.slice(0, i);
+            plexOpenByNav(n);
+          });
+          cr.appendChild(a);
+          cr.appendChild(document.createTextNode(" / "));
+        });
+        if (current) {
+          const s = document.createElement("span");
+          s.textContent = current;
+          cr.appendChild(s);
+        }
+      }
+
+      async function plexOpenByNav(n) {
+        if (n.kind === "show") {
+          const items = await invoke("plex_seasons", { ratingKey: n.key });
+          plexShowItems(items);
+          plexRenderCrumbs(n.title);
+        } else if (n.kind === "season") {
+          const items = await invoke("plex_episodes", { ratingKey: n.key });
+          plexShowItems(items);
+          plexRenderCrumbs(n.title);
+        }
+      }
+
+      async function plexShowItems(items) {
+        const grid = $("plex-grid");
+        grid.innerHTML = "";
+        if (!items.length) {
+          grid.innerHTML = '<div class="empty">Empty.</div>';
+          return;
+        }
+        items.forEach((it) => grid.appendChild(plexCard(it)));
+      }
+
+      function plexCard(it) {
+        const card = document.createElement("div");
+        card.className = "card";
+
+        const thumb = document.createElement("img");
+        thumb.className = "thumb";
+        thumb.src = it.thumb || "";
+        thumb.alt = it.title;
+        card.appendChild(thumb);
+
+        const title = document.createElement("div");
+        title.className = "title";
+        let meta = it.year ? String(it.year) : "";
+        if (it.index != null) {
+          meta = (it.kind === "season" ? "Season " : "Ep ") + it.index + (meta ? " · " + meta : "");
+        }
+        title.textContent = it.title + (meta ? " (" + meta + ")" : "");
+        card.appendChild(title);
+
+        const m = document.createElement("div");
+        m.className = "meta";
+        m.textContent = it.kind;
+        card.appendChild(m);
+
+        const actions = document.createElement("div");
+        actions.className = "actions";
+        if (it.kind === "movie" || it.kind === "episode") {
+          const playApp = document.createElement("button");
+          playApp.textContent = "▶ App";
+          playApp.addEventListener("click", () => plexPlay(it, true));
+          const playExt = document.createElement("button");
+          playExt.className = "ghost";
+          playExt.textContent = "Play";
+          playExt.addEventListener("click", () => plexPlay(it, false));
+          actions.appendChild(playApp);
+          actions.appendChild(playExt);
+        } else {
+          const open = document.createElement("button");
+          open.textContent = "Open";
+          open.addEventListener("click", () => {
+            plexNav.push({ title: it.title, key: it.rating_key, kind: it.kind });
+            plexOpenByNav({ title: it.title, key: it.rating_key, kind: it.kind });
+          });
+          actions.appendChild(open);
+        }
+        card.appendChild(actions);
+        return card;
+      }
+
+      async function plexPlay(it, inApp) {
+        if (inApp === undefined) inApp = inAppAvailable;
+        try {
+          setStatus("Resolving “" + it.title + "”…");
+          const p = await invoke("plex_item_url", { ratingKey: it.rating_key });
+          await playChannel({ url: p.url, name: p.title, icon: p.thumb }, inApp);
+          setStatus("Playing " + p.title);
+        } catch (e) {
+          setStatus("Failed to play: " + e, true);
+        }
+      }
 
       // Boot
       (async () => {

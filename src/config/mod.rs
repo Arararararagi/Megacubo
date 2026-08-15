@@ -11,6 +11,16 @@ pub struct Config {
     pub external_player: Option<String>,
     pub auto_update_epg: bool,
     pub epg_update_interval_secs: u64,
+    pub plex: Option<PlexConfig>,
+}
+
+/// Persisted Plex connection (token + chosen server).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlexConfig {
+    pub client_id: String,
+    pub auth_token: String,
+    pub server_url: String,
+    pub server_name: String,
 }
 
 impl Default for Config {
@@ -22,6 +32,7 @@ impl Default for Config {
             external_player: None,
             auto_update_epg: true,
             epg_update_interval_secs: 1800,
+            plex: None,
         }
     }
 }

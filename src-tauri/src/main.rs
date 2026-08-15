@@ -10,9 +10,12 @@ mod app {
     use megacubo::{
         Database, default_db_path, M3uParser,
         ListManager, Streamer,
+        config::{Config, PlexConfig},
         db::Channel, epg::{EpgManager, EpgProgramme},
         lists::{List, ListType, ListStatus}, parser::M3uEntry,
         xtream::{XtreamCredentials, XtreamChannel},
+        plex::{PlexClient, PlexPin, PlexServer, PlexLibrary, PlexItem, PlexPlayable,
+               generate_client_id, create_pin, poll_pin, fetch_servers},
     };
 
     pub fn run() {
@@ -70,6 +73,15 @@ mod app {
                 refresh_epg,
                 get_epg_schedule,
                 launch_external_player,
+                plex_login_start,
+                plex_login_poll,
+                plex_servers,
+                plex_save_server,
+                plex_libraries,
+                plex_browse,
+                plex_seasons,
+                plex_episodes,
+                plex_item_url,
                 playback::init_player,
                 playback::play_in_app,
                 playback::pause_in_app,
@@ -98,6 +110,15 @@ mod app {
                 refresh_epg,
                 get_epg_schedule,
                 launch_external_player,
+                plex_login_start,
+                plex_login_poll,
+                plex_servers,
+                plex_save_server,
+                plex_libraries,
+                plex_browse,
+                plex_seasons,
+                plex_episodes,
+                plex_item_url,
             ]);
         }
 
@@ -234,6 +255,133 @@ mod app {
             .await
             .map_err(|e| e.to_string())?;
         Ok(format!("Removed playlist {}", list_url))
+    }
+
+    // ----- Plex -----
+
+    /// Ensure a stable client id exists in the config; return it.
+    async fn ensure_plex_client_id() -> Result<String, String> {
+        let mut cfg = Config::load().await.map_err(|e| e.to_string())?;
+        if let Some(p) = &cfg.plex {
+            if !p.client_id.is_empty() {
+                return Ok(p.client_id.clone());
+            }
+        }
+        let id = generate_client_id();
+        cfg.plex = Some(PlexConfig {
+            client_id: id.clone(),
+            auth_token: String::new(),
+            server_url: String::new(),
+            server_name: String::new(),
+        });
+        cfg.save().await.map_err(|e| e.to_string())?;
+        Ok(id)
+    }
+
+    /// Start a Plex login PIN (returns code + auth URL to show the user).
+    #[tauri::command]
+    async fn plex_login_start() -> Result<PlexPin, String> {
+        let client_id = ensure_plex_client_id().await?;
+        create_pin(&client_id).await.map_err(|e| e.to_string())
+    }
+
+    /// Poll a Plex login PIN; returns the token once authenticated.
+    #[tauri::command]
+    async fn plex_login_poll(pin_id: String) -> Result<Option<String>, String> {
+        let cfg = Config::load().await.map_err(|e| e.to_string())?;
+        let client_id = cfg
+            .plex
+            .map(|p| p.client_id)
+            .unwrap_or_else(|| "megacubo".to_string());
+        poll_pin(&pin_id, &client_id).await.map_err(|e| e.to_string())
+    }
+
+    /// Discover the user's Plex Media Servers for the given token.
+    #[tauri::command]
+    async fn plex_servers(token: String) -> Result<Vec<PlexServer>, String> {
+        let cfg = Config::load().await.map_err(|e| e.to_string())?;
+        let client_id = cfg
+            .plex
+            .map(|p| p.client_id)
+            .unwrap_or_else(|| "megacubo".to_string());
+        fetch_servers(&token, &client_id).await.map_err(|e| e.to_string())
+    }
+
+    /// Persist the chosen server + token, completing the login.
+    #[tauri::command]
+    async fn plex_save_server(
+        server_url: String,
+        name: String,
+        token: String,
+    ) -> Result<String, String> {
+        let mut cfg = Config::load().await.map_err(|e| e.to_string())?;
+        let client_id = match &cfg.plex {
+            Some(p) if !p.client_id.is_empty() => p.client_id.clone(),
+            _ => generate_client_id(),
+        };
+        cfg.plex = Some(PlexConfig {
+            client_id,
+            auth_token: token,
+            server_url,
+            server_name: name,
+        });
+        cfg.save().await.map_err(|e| e.to_string())?;
+        Ok("Plex server saved".to_string())
+    }
+
+    /// List libraries/sections (requires a saved server).
+    #[tauri::command]
+    async fn plex_libraries() -> Result<Vec<PlexLibrary>, String> {
+        let cfg = Config::load().await.map_err(|e| e.to_string())?;
+        let p = cfg.plex.ok_or_else(|| "Plex not configured".to_string())?;
+        PlexClient::new(p.server_url, p.auth_token, p.client_id)
+            .libraries()
+            .await
+            .map_err(|e| e.to_string())
+    }
+
+    /// List items (movies or series) in a section.
+    #[tauri::command]
+    async fn plex_browse(section: String) -> Result<Vec<PlexItem>, String> {
+        let cfg = Config::load().await.map_err(|e| e.to_string())?;
+        let p = cfg.plex.ok_or_else(|| "Plex not configured".to_string())?;
+        PlexClient::new(p.server_url, p.auth_token, p.client_id)
+            .browse(&section)
+            .await
+            .map_err(|e| e.to_string())
+    }
+
+    /// List seasons of a series.
+    #[tauri::command]
+    async fn plex_seasons(rating_key: String) -> Result<Vec<PlexItem>, String> {
+        let cfg = Config::load().await.map_err(|e| e.to_string())?;
+        let p = cfg.plex.ok_or_else(|| "Plex not configured".to_string())?;
+        PlexClient::new(p.server_url, p.auth_token, p.client_id)
+            .seasons(&rating_key)
+            .await
+            .map_err(|e| e.to_string())
+    }
+
+    /// List episodes of a season.
+    #[tauri::command]
+    async fn plex_episodes(rating_key: String) -> Result<Vec<PlexItem>, String> {
+        let cfg = Config::load().await.map_err(|e| e.to_string())?;
+        let p = cfg.plex.ok_or_else(|| "Plex not configured".to_string())?;
+        PlexClient::new(p.server_url, p.auth_token, p.client_id)
+            .episodes(&rating_key)
+            .await
+            .map_err(|e| e.to_string())
+    }
+
+    /// Resolve the direct-play URL + metadata for a movie/episode.
+    #[tauri::command]
+    async fn plex_item_url(rating_key: String) -> Result<PlexPlayable, String> {
+        let cfg = Config::load().await.map_err(|e| e.to_string())?;
+        let p = cfg.plex.ok_or_else(|| "Plex not configured".to_string())?;
+        PlexClient::new(p.server_url, p.auth_token, p.client_id)
+            .playable(&rating_key)
+            .await
+            .map_err(|e| e.to_string())
     }
 
     /// Get channels for a list (first page)
