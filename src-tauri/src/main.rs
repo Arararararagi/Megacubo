@@ -10,7 +10,7 @@ mod app {
     use megacubo::{
         Database, default_db_path, M3uParser,
         ListManager, Streamer,
-        config::{Config, PlexConfig},
+        config::{Config, PlexConfig, Settings},
         db::Channel, epg::{EpgManager, EpgProgramme},
         lists::{List, ListType, ListStatus}, parser::M3uEntry,
         xtream::{XtreamCredentials, XtreamChannel},
@@ -26,9 +26,17 @@ mod app {
                 let db = tauri::async_runtime::block_on(Database::new(db_path.clone()))?;
 
                 // Refresh EPG for any lists that already have a guide wired up,
-                // so the schedule is populated on launch without manual clicks.
+                // so the schedule is populated on launch without manual clicks
+                // (respecting the user's "auto-update EPG" setting).
                 let startup_db = db.clone();
                 tauri::async_runtime::spawn(async move {
+                    let auto = Config::load()
+                        .await
+                        .map(|c| c.auto_update_epg)
+                        .unwrap_or(true);
+                    if !auto {
+                        return;
+                    }
                     if let Ok(lists) = ListManager::new(startup_db.pool().clone())
                         .get_all()
                         .await
@@ -84,6 +92,8 @@ mod app {
                 plex_item_url,
                 plex_set_watched,
                 plex_refresh,
+                get_settings,
+                set_settings,
                 playback::init_player,
                 playback::play_in_app,
                 playback::pause_in_app,
@@ -123,6 +133,8 @@ mod app {
                 plex_item_url,
                 plex_set_watched,
                 plex_refresh,
+                get_settings,
+                set_settings,
             ]);
         }
 
@@ -525,9 +537,24 @@ mod app {
     /// Launch an external player for a stream URL
     #[tauri::command]
     async fn launch_external_player(url: String) -> Result<(), String> {
-        Streamer::new(false, None)
+        let cfg = Config::load().await.map_err(|e| e.to_string())?;
+        Streamer::new(false, cfg.external_player)
             .launch_external_player(&url)
             .map_err(|e| e.to_string())
+    }
+
+    /// Return the current user settings (no secret Plex token).
+    #[tauri::command]
+    async fn get_settings() -> Result<Settings, String> {
+        Ok(Config::load().await.map_err(|e| e.to_string())?.settings())
+    }
+
+    /// Persist user settings.
+    #[tauri::command]
+    async fn set_settings(settings: Settings) -> Result<(), String> {
+        let mut cfg = Config::load().await.map_err(|e| e.to_string())?;
+        cfg.apply_settings(settings);
+        cfg.save().await.map_err(|e| e.to_string())
     }
 
     /// In-app playback commands (require `media` feature)

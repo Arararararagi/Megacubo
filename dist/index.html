@@ -98,6 +98,15 @@
       #player-bar .ctrl { display: flex; gap: 6px; }
       #player-bar input[type="range"] { flex: 1; }
       #player-bar .tm { color: var(--muted); font-size: 12px; min-width: 90px; text-align: right; }
+      .panel-box { max-width: 520px; margin: 18px auto; background: var(--panel); border: 1px solid #00000040; border-radius: 12px; padding: 18px 20px; }
+      .panel-box h2 { margin-top: 0; }
+      .panel-box label { display: flex; flex-direction: column; gap: 6px; margin: 14px 0; font-weight: 600; }
+      .panel-box label.check { flex-direction: row; align-items: center; gap: 8px; font-weight: 500; }
+      .panel-box input[type="text"], .panel-box input[type="url"], .panel-box input[type="number"], .panel-box select {
+        padding: 8px 10px; border-radius: 8px; border: 1px solid #00000040; background: var(--bg); color: var(--text);
+      }
+      .row-actions { display: flex; align-items: center; gap: 12px; margin-top: 16px; }
+      body.light { --bg: #f3f4f8; --panel: #ffffff; --text: #14161c; --muted: #5b6472; --accent: #2b6cff; --danger: #d23b3b; }
     </style>
   </head>
   <body>
@@ -121,6 +130,7 @@
       <button data-tab="history">History</button>
       <button data-tab="epg">EPG</button>
       <button data-tab="plex">Plex</button>
+      <button data-tab="settings">Settings</button>
     </div>
 
     <div class="status" id="status"></div>
@@ -176,6 +186,34 @@
           </div>
           <div class="crumbs" id="plex-crumbs" style="margin:6px 0;color:var(--muted);font-size:13px"></div>
           <div class="grid" id="plex-grid"></div>
+        </div>
+      </section>
+
+      <section id="panel-settings" hidden>
+        <div class="panel-box">
+          <h2>Settings</h2>
+          <label>Theme
+            <select id="set-theme">
+              <option value="dark">Dark</option>
+              <option value="light">Light</option>
+            </select>
+          </label>
+          <label>External player (path/command, optional)
+            <input id="set-external" placeholder="e.g. /usr/bin/vlc or vlc" />
+          </label>
+          <label class="check">
+            <input type="checkbox" id="set-hw" /> Hardware acceleration (in-app playback)
+          </label>
+          <label class="check">
+            <input type="checkbox" id="set-epg-auto" /> Auto-update EPG on launch
+          </label>
+          <label>EPG update interval (seconds)
+            <input type="number" id="set-epg-int" min="60" step="60" />
+          </label>
+          <div class="row-actions">
+            <button id="set-save">Save</button>
+            <span id="set-status" class="meta"></span>
+          </div>
         </div>
       </section>
     </main>
@@ -669,6 +707,7 @@
           if (t === "bookmarks") loadBookmarks();
           if (t === "history") loadHistory();
           if (t === "plex") plexInit();
+          if (t === "settings") loadSettings();
         })
       );
 
@@ -914,8 +953,51 @@
         }
       }
 
+      // ---------- Settings ----------
+      function applyTheme(name) {
+        document.body.classList.toggle("light", name === "light");
+      }
+
+      async function loadSettings() {
+        try {
+          const s = await invoke("get_settings");
+          $("set-theme").value = s.theme || "dark";
+          $("set-external").value = s.external_player || "";
+          $("set-hw").checked = !!s.hardware_acceleration;
+          $("set-epg-auto").checked = !!s.auto_update_epg;
+          $("set-epg-int").value = s.epg_update_interval_secs || 1800;
+          $("set-status").textContent = "";
+        } catch (e) {
+          setStatus("Failed to load settings: " + e, true);
+        }
+      }
+
+      $("set-save").addEventListener("click", async () => {
+        const s = {
+          language: "en",
+          theme: $("set-theme").value,
+          hardware_acceleration: $("set-hw").checked,
+          external_player: $("set-external").value.trim() || null,
+          auto_update_epg: $("set-epg-auto").checked,
+          epg_update_interval_secs: parseInt($("set-epg-int").value, 10) || 1800,
+        };
+        try {
+          await invoke("set_settings", { settings: s });
+          applyTheme(s.theme);
+          $("set-status").textContent = "Saved.";
+          setStatus("Settings saved");
+        } catch (e) {
+          $("set-status").textContent = "Error: " + e;
+          setStatus("Failed to save settings: " + e, true);
+        }
+      });
+
       // Boot
       (async () => {
+        try {
+          const s = await invoke("get_settings");
+          applyTheme(s.theme || "dark");
+        } catch (e) { /* ignore */ }
         try {
           await loadLists();
         } catch (e) {
