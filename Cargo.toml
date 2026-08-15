@@ -66,8 +66,8 @@ which = { version = "4", default-features = false }
 # Optional: Tauri for desktop UI (Phase 1)
 tauri = { version = "2", optional = true , features = [] }
 
-# Optional: libmpv for playback (Phase 3). Requires the system libmpv C library.
-libmpv = { version = "2", optional = true }
+# Optional: libmpv for playback (Phase 3). Requires the system libmpv C library (2.x).
+libmpv2 = { version = "6", optional = true }
 
 # Optional: napi for Node.js module (Phase 5)
 napi = { version = "2", optional = true }
@@ -82,7 +82,7 @@ napi-derive = { version = "2", optional = true }
 [features]
 default = ["desktop", "media"]
 desktop = ["tauri"]
-media = ["libmpv"]
+media = ["libmpv2"]
 node-module = ["napi", "napi-derive"]
 
 [build-dependencies]

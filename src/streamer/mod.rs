@@ -34,13 +34,13 @@ pub enum PlaybackState {
 
 #[cfg(feature = "media")]
 pub struct MpvPlayer {
-    ctx: Arc<libmpv::Mpv>,
+    ctx: Arc<libmpv2::Mpv>,
 }
 
 #[cfg(feature = "media")]
 impl MpvPlayer {
     pub fn new() -> anyhow::Result<Self> {
-        let ctx = libmpv::Mpv::new().map_err(|e| anyhow::anyhow!("{}", e))?;
+        let ctx = libmpv2::Mpv::new().map_err(|e| anyhow::anyhow!("{}", e))?;
         ctx.set_property("vo", "gpu").map_err(|e| anyhow::anyhow!("{}", e))?;
         ctx.set_property("hwdec", "auto").map_err(|e| anyhow::anyhow!("{}", e))?;
         ctx.set_property("keep-open", "yes").map_err(|e| anyhow::anyhow!("{}", e))?;
@@ -114,7 +114,13 @@ impl Streamer {
     pub fn new(_hardware_acceleration: bool, external_player: Option<String>) -> Self {
         #[cfg(feature = "media")]
         let mpv = if _hardware_acceleration {
-            MpvPlayer::new().ok()
+            match MpvPlayer::new() {
+                Ok(p) => Some(p),
+                Err(e) => {
+                    error!("In-app player unavailable: {}", e);
+                    None
+                }
+            }
         } else {
             None
         };
@@ -320,5 +326,14 @@ mod tests {
             s.probe_stream("http://x/foo.mp4").await.unwrap().stream_type,
             StreamType::Http
         );
+    }
+
+    #[cfg(feature = "media")]
+    #[test]
+    fn test_mpv_new() {
+        match MpvPlayer::new() {
+            Ok(_) => println!("MpvPlayer::new() OK"),
+            Err(e) => println!("MpvPlayer::new() FAILED: {}", e),
+        }
     }
 }

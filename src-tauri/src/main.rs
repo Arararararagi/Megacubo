@@ -706,6 +706,9 @@ mod app {
         pub async fn init_player(state: State<'_, PlayerState>) -> Result<(), String> {
             let mut streamer = state.streamer.lock().map_err(|e| e.to_string())?;
             *streamer = Streamer::new(true, None);
+            if streamer.mpv.is_none() {
+                return Err("In-app playback unavailable: libmpv could not be initialized".to_string());
+            }
             Ok(())
         }
 
