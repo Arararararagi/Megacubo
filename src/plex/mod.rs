@@ -322,8 +322,26 @@ pub async fn poll_pin(id: &str, client_id: &str) -> Result<Option<String>> {
 }
 
 /// Discover the user's Plex Media Servers from plex.tv.
+/// Extract the JSON payload from a Plex response body that may be wrapped in a
+/// JSONP callback (e.g. `loader({...});`). Returns the substring between the
+/// first `{`/`[` and the last `}`/`]`, or the whole string if no wrapper is
+/// detected. This keeps parsing robust against Plex's JSONP responses while
+/// leaving already-pure JSON untouched.
+fn extract_json_body(body: &str) -> &str {
+    let body = body.trim();
+    if let (Some(start), Some(end)) = (
+        body.find(|c| c == '{' || c == '['),
+        body.rfind(|c| c == '}' || c == ']'),
+    ) {
+        if start <= end {
+            return &body[start..=end];
+        }
+    }
+    body
+}
+
 pub async fn fetch_servers(token: &str, client_id: &str) -> Result<Vec<PlexServer>> {
-    let r: Root = reqwest::Client::new()
+    let resp = reqwest::Client::new()
         .get(format!(
             "{}/api/v2/resources?includeHttps=1&includeRelays=1",
             PLEX_TV
@@ -336,9 +354,15 @@ pub async fn fetch_servers(token: &str, client_id: &str) -> Result<Vec<PlexServe
         .header("Accept", "application/json")
         .send()
         .await
-        .map_err(|e| anyhow!("Plex resources request failed: {}", e))?
-        .json()
+        .map_err(|e| anyhow!("Plex resources request failed: {}", e))?;
+
+    // Plex wraps the authenticated /resources response in a JSONP callback
+    // (e.g. `loader({...});`), so strip any wrapper before parsing.
+    let body = resp
+        .text()
         .await
+        .map_err(|e| anyhow!("Plex resources request failed: {}", e))?;
+    let r: Root = serde_json::from_str(extract_json_body(&body))
         .map_err(|e| anyhow!("Plex resources response invalid: {}", e))?;
 
     let mut servers = Vec::new();
@@ -611,5 +635,15 @@ mod tests {
         let client = PlexClient::new("http://h:32400".into(), "T".into(), "cid".into());
         let url = client.direct_play_url(meta).unwrap();
         assert_eq!(url, "http://h:32400/library/parts/42/file.mp4?X-Plex-Token=T");
+    }
+
+    #[test]
+    fn test_extract_json_strips_jsonp() {
+        let wrapped = "loader({\"MediaContainer\": {\"Device\": []}});";
+        let got = extract_json_body(wrapped);
+        assert_eq!(got, "{\"MediaContainer\": {\"Device\": []}}");
+        // Pure JSON is returned unchanged.
+        let pure = "{\"MediaContainer\": {\"Device\": []}}";
+        assert_eq!(extract_json_body(pure), pure);
     }
 }
