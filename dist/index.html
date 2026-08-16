@@ -877,7 +877,7 @@
           const pin = await invoke("plex_login_start");
           $("plex-pin").style.display = "block";
           $("plex-code").textContent = pin.code;
-          $("plex-link").href = pin.linkUrl;
+          $("plex-link").href = pin.link_url;
           setStatus("Approve the code on plex.tv…");
           if (plexPinTimer) clearInterval(plexPinTimer);
           plexPinTimer = setInterval(async () => {

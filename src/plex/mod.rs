@@ -530,6 +530,19 @@ mod tests {
     }
 
     #[test]
+    fn test_plex_pin_serializes_link_url() {
+        let pin = PlexPin {
+            id: "1".into(),
+            code: "ABC".into(),
+            link_url: "https://app.plex.tv/auth#?clientID=x&code=ABC".into(),
+        };
+        let json = serde_json::to_string(&pin).unwrap();
+        // Tauri serializes structs as snake_case, so the UI must read `link_url`.
+        assert!(json.contains("\"link_url\""), "expected snake_case key, got: {}", json);
+        assert!(json.contains("https://app.plex.tv/auth"), "got: {}", json);
+    }
+
+    #[test]
     fn test_scrobble_path() {
         assert_eq!(
             scrobble_path("123", true),
