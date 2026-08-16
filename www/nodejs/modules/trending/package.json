@@ -1,6 +1,0 @@
-{
-    "type": "module",
-"exports": "./trending.js",
-    "name": "trending"
- }
- 

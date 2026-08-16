@@ -1,6 +1,0 @@
-{
-    "name": "menu",
-    "type": "module",
-"exports": "./menu.js"
-  }
-  

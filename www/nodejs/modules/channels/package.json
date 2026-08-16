@@ -1,6 +1,0 @@
-{
-    "name": "channels",
-    "type": "module",
-"exports": "./channels.js"
-  }
-  

@@ -1,5 +1,0 @@
-{
-  "name": "bridge",
-  "type": "module",
-"exports": "./bridge.js"
-}

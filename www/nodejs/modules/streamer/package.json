@@ -1,6 +1,0 @@
-{
-   "type": "module",
-"exports": "./streamer.js",
-   "name": "streamer",
-   "version": "0.0.1"
-}

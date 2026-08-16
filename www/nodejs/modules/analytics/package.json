@@ -1,6 +1,0 @@
-{
-    "type": "module",
-"exports": "./analytics.js",
-    "name": "analytics"
- }
- 

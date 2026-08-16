@@ -1,6 +1,0 @@
-{
-    "name": "entries-group",
-    "type": "module",
-"exports": "./entries-group.js"
-  }
-  

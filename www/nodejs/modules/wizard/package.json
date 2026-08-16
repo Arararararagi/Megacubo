@@ -1,5 +1,0 @@
-{
-    "type": "module",
-"exports": "./wizard.js",
-    "name": "wizard"
-} 

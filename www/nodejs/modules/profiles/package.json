@@ -1,6 +1,0 @@
-{
-    "type": "module",
-"exports": "./profiles.js",
-    "name": "profiles"
- }
- 

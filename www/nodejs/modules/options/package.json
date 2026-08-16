@@ -1,7 +1,0 @@
-{
-    "type": "module",
-"exports": "./options.js",
-    "name": "options",
-    "version": "0.0.1"
- }
- 

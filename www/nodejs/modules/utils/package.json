@@ -1,5 +1,0 @@
-{
-  "name": "utils",
-  "type": "module",
-"exports": "./utils.js"
-}

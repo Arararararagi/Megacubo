@@ -1,6 +1,0 @@
-{
-    "name": "premium-helper",
-    "type": "module",
-    "exports": "./premium-helper.js"
-  }
-  

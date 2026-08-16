@@ -1,6 +1,0 @@
-{
-    "type": "module",
-"exports": "./zap.js",
-    "name": "zap"
- }
- 

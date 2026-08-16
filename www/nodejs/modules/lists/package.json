@@ -1,6 +1,0 @@
-{
-   "type": "module",
-"exports": "./lists.js",
-   "name": "lists",
-   "version": "0.0.1"
-}

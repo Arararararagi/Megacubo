@@ -1,6 +1,0 @@
-{
-    "type": "module",
-"exports": "./diagnostics.js",
-    "name": "diagnostics"
- }
- 

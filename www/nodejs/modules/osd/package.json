@@ -1,6 +1,0 @@
-{
-    "name": "osd",
-    "type": "module",
-"exports": "./osd.js"
-  }
-  

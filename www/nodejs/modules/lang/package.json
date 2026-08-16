@@ -1,6 +1,0 @@
-{
-    "name": "lang",
-    "type": "module",
-"exports": "./lang.js"
-  }
-  

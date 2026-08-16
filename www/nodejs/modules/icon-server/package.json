@@ -1,6 +1,0 @@
-{
-    "type": "module",
-"exports": "./icon-server.js",
-    "name": "icon-server"
- }
- 

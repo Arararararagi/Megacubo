@@ -1,6 +1,0 @@
-{
-    "name": "downloads",
-    "type": "module",
-"exports": "./downloads.js"
-  }
-  

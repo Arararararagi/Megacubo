@@ -1,6 +1,0 @@
-{
-    "name": "config",
-    "type": "module",
-"exports": "./config.js"
-  }
-  

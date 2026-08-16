@@ -1,6 +1,0 @@
-{
-    "type": "module",
-"exports": "./multi-worker.js",
-    "name": "multi-worker"
- }
- 

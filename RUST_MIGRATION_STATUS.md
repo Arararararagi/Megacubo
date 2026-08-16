@@ -1,6 +1,6 @@
 # Megacubo → Rust Migration: Status & Next Steps
 
-> Companion to `RUST_REWRITE_PLAN.md` (the original technical proposal). This document tracks what is actually built, the decisions made, and the remaining work.
+> This document tracks what is actually built, the decisions made, and the remaining work. (The original `RUST_REWRITE_PLAN.md` proposal has been removed as part of the pre-rewrite code cleanup.)
 
 ## 1. Goal
 Rewrite the Electron/JS-based Megacubo IPTV player in Rust, using **Tauri v2** as the desktop shell, **Tokio** for async, **SQLite** (via `sqlx`) for storage, and **libmpv** for playback. **Desktop-only** — targets Windows, macOS, and Linux. Android is dropped. Phased rollout in §6.
@@ -140,3 +140,6 @@ cargo run --features desktop  # launch window
 # media feature (playback) additionally requires system libmpv:
 cargo build --features desktop,media
 ```
+
+## 8. Repo cleanup (pre-rewrite removal)
+The original Electron/Angular/Capacitor source was removed (commit: pre-rewrite cleanup). Deleted: `www/`, `android/`, `website/`, `package.json`/`package-lock.json`, `main.mjs`, all Electron/Capacitor build scripts & configs (`build*.mjs`, `prepare.mjs`, `configure.mjs`, `test.mjs`, `capacitor.*`, `electron-builder.config.*`, `babel.*`, `rollup.config.*`), `scripts/`, `patches/`, `assets/`, `.npmignore`, `.nvmrc`, `.all-contributorsrc`, and `RUST_REWRITE_PLAN.md`. **Kept** (used by the Rust/Tauri app): `src/`, `src-tauri/`, `dist/`, `Cargo.toml`, `Cargo.lock`, `tauri.conf.json`, `build.rs` (required Tauri build script), `icons/`, `.github/`, `.cargo/`, `.gitignore`. `build.rs` stays — it runs `tauri_build::build()`. Release build verified green after removal.

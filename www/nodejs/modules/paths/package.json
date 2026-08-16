@@ -1,6 +1,0 @@
-{
-    "type": "module",
-    "exports": "./paths.js",
-    "name": "paths"
- }
- 
