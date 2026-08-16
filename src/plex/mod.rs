@@ -406,6 +406,9 @@ pub async fn fetch_servers(token: &str, client_id: &str) -> Result<Vec<PlexServe
 fn pick_connection(conns: Vec<Connection>) -> Option<String> {
     let mut best: Option<(u8, String)> = None;
     for c in conns {
+        if c.uri.is_empty() {
+            continue;
+        }
         let score = match (c.local, c.protocol.as_str()) {
             (true, "https") => 0,
             (true, _) => 1,
@@ -502,7 +505,8 @@ struct Device {
     name: String,
     #[serde(default)]
     provides: String,
-    #[serde(default, rename = "Connections")]
+    // Plex returns the connection list under the camelCase key `connections`.
+    #[serde(default, rename = "connections", alias = "Connections")]
     connections: Vec<Connection>,
 }
 
@@ -614,13 +618,17 @@ mod tests {
 
     #[test]
     fn test_parse_resources_json_picks_server() {
+        // Plex returns the connection list under the lowercase `connections` key.
         let json = r#"{
             "MediaContainer": {
                 "Device": [
-                    {"name": "NAS", "provides": "server", "Connections": [
+                    {"name": "NAS", "provides": "server", "connections": [
                         {"protocol": "https", "uri": "https://192.168.1.10:32400", "local": true}
                     ]},
-                    {"name": "Client", "provides": "player", "Connections": []}
+                    {"name": "Client", "provides": "player", "connections": []},
+                    {"name": "Bad", "provides": "server", "connections": [
+                        {"protocol": "http", "uri": ""}
+                    ]}
                 ]
             }
         }"#;
