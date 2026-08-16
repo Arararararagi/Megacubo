@@ -323,21 +323,21 @@ pub async fn poll_pin(id: &str, client_id: &str) -> Result<Option<String>> {
 
 /// Discover the user's Plex Media Servers from plex.tv.
 /// Extract the JSON payload from a Plex response body that may be wrapped in a
-/// JSONP callback (e.g. `loader({...});`). Returns the substring between the
-/// first `{`/`[` and the last `}`/`]`, or the whole string if no wrapper is
-/// detected. This keeps parsing robust against Plex's JSONP responses while
-/// leaving already-pure JSON untouched.
+/// JSONP callback (e.g. `loader({...});` or `loader([...]);`) and/or suffixed
+/// with a stray `;`. Returns the inner JSON value, leaving already-pure JSON
+/// untouched.
 fn extract_json_body(body: &str) -> &str {
-    let body = body.trim();
-    if let (Some(start), Some(end)) = (
-        body.find(|c| c == '{' || c == '['),
-        body.rfind(|c| c == '}' || c == ']'),
-    ) {
-        if start <= end {
-            return &body[start..=end];
+    let mut body = body.trim();
+    // Strip a JSONP callback wrapper: `name(JSON)` or `name(JSON);`.
+    if let Some(open) = body.find('(') {
+        let after = &body[open + 1..];
+        if after.trim_start().starts_with('{') || after.trim_start().starts_with('[') {
+            if let Some(close) = body.rfind(')') {
+                body = &body[open + 1..close];
+            }
         }
     }
-    body
+    body.trim().trim_end_matches(';').trim()
 }
 
 pub async fn fetch_servers(token: &str, client_id: &str) -> Result<Vec<PlexServer>> {
@@ -356,14 +356,31 @@ pub async fn fetch_servers(token: &str, client_id: &str) -> Result<Vec<PlexServe
         .await
         .map_err(|e| anyhow!("Plex resources request failed: {}", e))?;
 
-    // Plex wraps the authenticated /resources response in a JSONP callback
-    // (e.g. `loader({...});`), so strip any wrapper before parsing.
+    // Plex sometimes wraps the authenticated /resources response in a JSONP
+    // callback and/or appends a trailing `;`, so strip any wrapper before
+    // parsing. Some deployments also return a top-level array of devices
+    // instead of the `{"MediaContainer": {...}}` wrapper.
     let body = resp
         .text()
         .await
         .map_err(|e| anyhow!("Plex resources request failed: {}", e))?;
-    let r: Root = serde_json::from_str(extract_json_body(&body))
-        .map_err(|e| anyhow!("Plex resources response invalid: {}", e))?;
+    let json = extract_json_body(&body);
+    let r = match serde_json::from_str::<Root>(json) {
+        Ok(r) => r,
+        Err(_) => {
+            let devices: Vec<Device> = serde_json::from_str(json)
+                .map_err(|e| {
+                    info!("Plex resources body: {}", &body[..body.len().min(200)]);
+                    anyhow!("Plex resources response invalid: {}", e)
+                })?;
+            Root {
+                container: MediaContainer {
+                    device: devices,
+                    ..Default::default()
+                },
+            }
+        }
+    };
 
     let mut servers = Vec::new();
     for dev in r.container.device {
@@ -639,9 +656,20 @@ mod tests {
 
     #[test]
     fn test_extract_json_strips_jsonp() {
+        // Object wrapped in a JSONP callback.
         let wrapped = "loader({\"MediaContainer\": {\"Device\": []}});";
-        let got = extract_json_body(wrapped);
-        assert_eq!(got, "{\"MediaContainer\": {\"Device\": []}}");
+        assert_eq!(
+            extract_json_body(wrapped),
+            "{\"MediaContainer\": {\"Device\": []}}"
+        );
+        // Array wrapped in a JSONP callback.
+        let arr = "loader([{\"name\":\"NAS\"}]);";
+        assert_eq!(extract_json_body(arr), "[{\"name\":\"NAS\"}]");
+        // Trailing semicolon without a callback wrapper.
+        assert_eq!(
+            extract_json_body("{\"MediaContainer\": {}};"),
+            "{\"MediaContainer\": {}}"
+        );
         // Pure JSON is returned unchanged.
         let pure = "{\"MediaContainer\": {\"Device\": []}}";
         assert_eq!(extract_json_body(pure), pure);

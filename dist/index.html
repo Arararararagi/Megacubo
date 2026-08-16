@@ -149,6 +149,10 @@
           <button class="ghost" id="remove-list">Remove</button>
           <span id="epg-progress" class="meta"></span>
         </div>
+        <div class="toolbar">
+          <input id="channels-search" placeholder="Search channels in this playlist…" />
+          <span id="channels-search-count" class="meta"></span>
+        </div>
         <div class="grid" id="channels-grid"></div>
       </section>
 
@@ -634,19 +638,41 @@
         }
       }
 
+      let channelCache = [];
+
+      function renderChannels() {
+        const q = ($("channels-search").value || "").trim().toLowerCase();
+        const grid = $("channels-grid");
+        grid.innerHTML = "";
+        const filtered = q
+          ? channelCache.filter((ch) =>
+              [ch.name, ch.group, ch.tvg_country]
+                .filter(Boolean)
+                .join(" ")
+                .toLowerCase()
+                .includes(q)
+            )
+          : channelCache;
+        if (!channelCache.length) {
+          grid.innerHTML = '<div class="empty">No channels. Add a playlist or click “Load EPG”? Channels come from M3U playlists.</div>';
+          $("channels-search-count").textContent = "";
+          return;
+        }
+        if (!filtered.length) {
+          grid.innerHTML = '<div class="empty">No channels match your search.</div>';
+        } else {
+          filtered.forEach((ch) => grid.appendChild(channelCard(ch)));
+        }
+        $("channels-search-count").textContent =
+          (q ? filtered.length + " / " : "") + channelCache.length + " channels";
+      }
+
       async function loadChannels(url) {
         try {
           setStatus("Loading channels…");
-          const channels = await invoke("get_channels", { listUrl: url });
-          const grid = $("channels-grid");
-          grid.innerHTML = "";
-          if (!channels.length) {
-            grid.innerHTML = '<div class="empty">No channels. Add a playlist or click “Load EPG”? Channels come from M3U playlists.</div>';
-            setStatus("");
-            return;
-          }
-          channels.forEach((ch) => grid.appendChild(channelCard(ch)));
-          setStatus(channels.length + " channels");
+          channelCache = await invoke("get_channels", { listUrl: url });
+          renderChannels();
+          setStatus(channelCache.length + " channels");
         } catch (e) {
           setStatus("Failed to load channels: " + e, true);
         }
@@ -656,6 +682,8 @@
         currentList = lists.find((l) => l.url === e.target.value) || null;
         loadChannels(e.target.value);
       });
+
+      $("channels-search").addEventListener("input", renderChannels);
 
       $("refresh-epg").addEventListener("click", async () => {
         if (!currentList || !currentList.epg_url) {
